@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { assistantText, citationLabel, parseChatResponse, safeCitationUrl, type ChatMessage } from '@/lib/agent/chat-response'
 import type { AgentExecution } from '@/lib/agent/contracts'
@@ -56,6 +56,7 @@ function BookmarkIcon() {
 
 export default function ChatClient({ email }: { email: string | null }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [conversations, setConversations] = useState<Array<{ id: string; title: string; updated_at: string }>>([])
   const [query, setQuery] = useState('')
   const [conversationId, setConversationId] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
@@ -63,6 +64,26 @@ export default function ChatClient({ email }: { email: string | null }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const router = useRouter()
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  async function refreshConversations() {
+    const response = await fetch('/api/conversations', { cache: 'no-store' })
+    if (!response.ok) return
+    const payload = await response.json() as { conversations?: Array<{ id: string; title: string; updated_at: string }> }
+    setConversations(payload.conversations ?? [])
+  }
+
+  useEffect(() => {
+    void refreshConversations()
+  }, [])
+
+  async function openConversation(id: string) {
+    const response = await fetch(`/api/conversations/${id}`, { cache: 'no-store' })
+    if (!response.ok) return
+    const payload = await response.json() as { conversation?: { id: string }; messages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> }
+    setConversationId(payload.conversation?.id ?? id)
+    setMessages((payload.messages ?? []).filter((message) => message.role === 'user' || message.role === 'assistant').map((message) => ({ role: message.role as 'user' | 'assistant', text: message.content })))
+    setSidebarOpen(false)
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -89,6 +110,7 @@ export default function ChatClient({ email }: { email: string | null }) {
       }
       setConversationId(result.conversationId ?? conversationId)
       setMessages((current) => [...current, { role: 'assistant', text: assistantText(result), result }])
+      void refreshConversations()
     } catch (error) {
       setMessages((current) => [...current, { role: 'assistant', text: error instanceof Error ? error.message : 'Minimi could not complete that request.' }])
     } finally {
@@ -147,11 +169,8 @@ export default function ChatClient({ email }: { email: string | null }) {
           <button type="button" className="sidebar-chat-item" onClick={() => inputRef.current?.focus()}><SourcesIcon /> Campaign here</button>
         </div>
         <div className="chat-history">
-          <p className="chat-history-label">Chat</p>
-          <button type="button" className="chat-history-item" onClick={() => inputRef.current?.focus()}>Launch a marketing campa...</button>
-          <button type="button" className="chat-history-item" onClick={() => inputRef.current?.focus()}>Design a new user interface f...</button>
-          <button type="button" className="chat-history-item" onClick={() => inputRef.current?.focus()}>Conduct a user research ses...</button>
-          <button type="button" className="chat-history-item" onClick={() => inputRef.current?.focus()}>Create a presentation for sta...</button>
+          <p className="chat-history-label">Chat history</p>
+          {conversations.length ? conversations.map((conversation) => <button key={conversation.id} type="button" className={conversation.id === conversationId ? 'chat-history-item chat-history-item-active' : 'chat-history-item'} onClick={() => void openConversation(conversation.id)}>{conversation.title || 'New conversation'}</button>) : <p className="chat-history-empty">Your saved conversations will appear here.</p>}
         </div>
         <div className="chat-sidebar-footer">
           <div className="chat-account"><span className="chat-avatar">{(email?.[0] ?? 'M').toUpperCase()}</span><span className="chat-account-email">{email ?? 'Research workspace'}</span></div>

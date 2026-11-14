@@ -1,4 +1,5 @@
 import { EvidenceSourceSchema, PublishedDateSchema, type EvidenceSource, type HistoricalRetrieval, type PublishedDate, type ResearchClaim, type WebSearchResult } from './contracts'
+import type { FinalAnswer } from './contracts'
 
 function instantDate(value: string | null): PublishedDate | null {
   return value ? { precision: 'instant', value } : null
@@ -19,6 +20,23 @@ export function buildWebEvidence(results: WebSearchResult[], observedAt: string)
     }
   }
   return sources
+}
+
+/**
+ * Safe provider-independent fallback. Search results are already bounded and
+ * validated by Tavily; when claim extraction or answer generation is down we
+ * still return the retrieved snippets with explicit source references instead
+ * of throwing away useful evidence.
+ */
+export function buildDeterministicWebAnswer(sources: EvidenceSource[]): FinalAnswer | null {
+  const webSources = sources.filter((source) => source.kind === 'web' && source.url).slice(0, 8)
+  if (!webSources.length) return null
+  const text = webSources.map((source) => `${source.title ?? source.domain ?? 'Source'}: ${source.snippet.trim().slice(0, 700)} [${source.id}]`).join('\n\n')
+  return {
+    text: `Here is the current evidence I found:\n\n${text}`,
+    citations: webSources.map((source) => ({ id: source.id, title: source.title ?? source.domain ?? 'Source', url: source.url! })),
+    claims: [],
+  }
 }
 
 export function buildHistoricalEvidence(history: HistoricalRetrieval): EvidenceSource[] {

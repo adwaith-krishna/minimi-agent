@@ -272,11 +272,11 @@ describe('full research orchestration', () => {
     expect(output).toMatchObject({ status: 'completed', searchExecution: { outcomes: [{ status: 'succeeded', resultCount: 0, failure: null }] } })
   })
 
-  it('returns and persists a partial result when answer generation fails', async () => {
+  it('returns and persists a partial result with raw evidence when answer generation fails', async () => {
     const mock = dependencies()
     vi.mocked(mock.reasoner.generateAnswer).mockRejectedValue(new Error('Gemini private detail'))
     const output = await executeAgent({ query: 'latest Acme news' }, context, mock.deps)
-    expect(output).toMatchObject({ status: 'partial', answer: null, error: { code: 'PROVIDER_ERROR' } })
+    expect(output).toMatchObject({ status: 'partial', answer: { citations: expect.any(Array), text: expect.stringContaining('current evidence') }, error: null })
     expect(JSON.stringify(output)).not.toContain('private detail')
     expect(mock.persistence.persist).toHaveBeenCalledOnce()
   })

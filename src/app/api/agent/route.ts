@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       classifier: hasReasoningProvider ? { classify: (query) => new OpenRouterHttpProvider().classifyIntent(query) } : undefined,
       reasoner: hasReasoningProvider ? new OpenRouterHttpProvider() : undefined,
       tavily: hasTavily ? new TavilyHttpProvider() : undefined,
-      persistence: hasReasoningProvider && hasTavily ? new SupabaseResearchPersistenceRepository(supabase) : undefined,
+      persistence: hasTavily ? new SupabaseResearchPersistenceRepository(supabase) : undefined,
       searchLimits: getSearchExecutionLimits(),
       maxSearchCalls: getSearchExecutionLimits().maxCalls,
     })

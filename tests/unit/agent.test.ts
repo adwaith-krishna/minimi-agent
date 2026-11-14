@@ -52,10 +52,29 @@ describe('agent contracts and intent classification', () => {
 
   it('uses deterministic phrase rules or an injected semantic classifier', async () => {
     expect(classifyIntentDeterministically('What did I decide in a previous chat?').intent).toBe('historical_conversation_recall')
+    expect(classifyIntentDeterministically('What did I ask you on 3 November? Is your answer still correct today?').intent).toBe('historical_current_comparison')
     expect(classifyIntentDeterministically('What is the latest on battery storage?').intent).toBe('current_research')
     const classifier = { classify: vi.fn().mockResolvedValue({ intent: 'historical_research_recall', confidence: 0.91, rationale: 'Prior results requested.' }) }
     expect((await classifyIntent('what did you find?', classifier)).intent).toBe('historical_research_recall')
     expect(classifier.classify).toHaveBeenCalledOnce()
+  })
+  it('protects high-signal web routes from a noisy provider classification', async () => {
+    const noisyClassifier = { classify: vi.fn().mockResolvedValue({ intent: 'general_conversational', confidence: 0.55, rationale: 'Misclassified.' }) }
+    expect((await classifyIntent('Has CRM pricing changed since our last shortlist?', noisyClassifier)).intent).toBe('historical_current_comparison')
+  })
+
+  it('routes the three evaluation scenarios to the required history/web paths', () => {
+    const crm = classifyIntentDeterministically('On Monday we shortlisted 5 CRM tools for a 20-person sales team. Has any of them changed pricing or shipped something big since?')
+    expect(crm.intent).toBe('historical_current_comparison')
+    expect(createSearchPlan({ intent: crm.intent, query: 'crm pricing since', hasHistoricalContext: true }).shouldSearchWeb).toBe(true)
+
+    const recall = classifyIntentDeterministically('What did I ask you on 3 November?')
+    expect(recall.intent).toBe('historical_conversation_recall')
+    expect(createSearchPlan({ intent: recall.intent, query: 'what did I ask on 3 November', hasHistoricalContext: true }).shouldSearchWeb).toBe(false)
+
+    const postgres = classifyIntentDeterministically('Last Tuesday I asked you about Postgres hosting. Has any pricing changed since then?')
+    expect(postgres.intent).toBe('historical_current_comparison')
+    expect(createSearchPlan({ intent: postgres.intent, query: 'Postgres hosting pricing changed since then', hasHistoricalContext: true }).shouldSearchWeb).toBe(true)
   })
 })
 
@@ -86,14 +105,20 @@ describe('temporal resolution', () => {
     expect(result.references.map(({ start }) => start)).toEqual(['2026-11-11', '2026-11-06'])
   })
 
-  it('recognizes absolute dates and asks for a missing year instead of guessing', () => {
+  it('resolves month/day dates against the user local year when the year is omitted', () => {
     const result = resolveTemporalReferences('Compare 2025-11-03 with 3 November', { timezone: 'Asia/Kolkata', referenceTimestamp })
     expect(result.references[0]).toMatchObject({ kind: 'absolute_date', start: '2025-11-03' })
-    expect(result.references[1]).toMatchObject({ kind: 'ambiguous', start: null, end: null })
+    expect(result.references[1]).toMatchObject({ kind: 'absolute_date', start: '2026-11-03' })
   })
 
   it('uses the safe timezone fallback for invalid timezones', () => {
     expect(resolveTemporalReferences('today', { timezone: 'Bad/Zone', referenceTimestamp }).timezone).toBe('Asia/Kolkata')
+  })
+
+  it('retrieves saved memories alongside messages for calendar follow-ups', () => {
+    const temporal = resolveTemporalReferences('What is planned for November 17th?', { timezone: 'Asia/Kolkata', referenceTimestamp })
+    const filter = createTemporalRetrievalFilter(temporal, 'historical_conversation_recall', 'What is planned for November 17th?')
+    expect(filter?.target).toBe('all')
   })
 
   it('marks unsupported relative and month-only date expressions ambiguous without treating ordinary month words as dates', () => {
@@ -256,6 +281,24 @@ describe('historical repository ownership boundary', () => {
     expect(mock.calls.some(({ method }) => method === 'textSearch')).toBe(false)
   })
 
+  it('keeps the recorded message for a calendar follow-up while applying event-time memory filtering', async () => {
+    const conversationId = '4e63cb00-88fd-4bb5-b271-e6a00e146a2b'
+    const interval = { startAt: '2026-11-16T18:30:00.000Z', endAt: '2026-11-17T18:30:00.000Z' }
+    const mock = makeQueryMock({ messages: [{
+      id: 'b879e41c-5110-485f-a9be-7cd85a2b8ad9', conversation_id: conversationId, role: 'user',
+      content: 'November 2 I had a meeting and the next meeting with the founder is on November 17th at 2pm.',
+      created_at: '2026-11-14T12:20:00.000Z',
+    }] })
+    const result = await new SupabaseHistoricalRepository(mock.client).retrieve({
+      userId: context.userId, query: 'What is planned for November 17th?', conversationId,
+      temporalFilter: { target: 'all', timezone: 'Asia/Kolkata', intervals: [interval] },
+    })
+    expect(result.messages[0]?.content).toContain('November 17th at 2pm')
+    expect(mock.calls).not.toContainEqual({ table: 'messages', method: 'gte', args: ['created_at', interval.startAt] })
+    expect(mock.calls).not.toContainEqual({ table: 'messages', method: 'lt', args: ['created_at', interval.endAt] })
+    expect(mock.calls).toContainEqual({ table: 'memory_items', method: 'or', args: [`and(or(valid_to.is.null,valid_to.gt.${interval.startAt}),or(valid_from.is.null,valid_from.lt.${interval.endAt}))`] })
+  })
+
   it('filters only completed snapshot completion timestamps', async () => {
     const interval = { startAt: '2026-11-02T00:00:00.000Z', endAt: '2026-11-09T00:00:00.000Z' }
     const conversationId = '4e63cb00-88fd-4bb5-b271-e6a00e146a2b'
@@ -307,6 +350,27 @@ describe('historical repository ownership boundary', () => {
 })
 
 describe('orchestration sequence and errors', () => {
+  it('answers a personal calendar follow-up from saved memory without a reasoning provider', async () => {
+    const repository: HistoricalRepository = { retrieve: vi.fn(async () => ({
+      messages: [],
+      memoryItems: [{ id: '00000000-0000-4000-8000-000000000001', entityName: 'calendar note', content: "The user's planned and scheduled calendar note is: the next meeting with the founder is on November 17th at 2pm.", validFrom: null, validTo: null, createdAt: '2026-11-14T10:00:00.000Z' }],
+      researchSnapshots: [],
+    })) }
+    const result = await executeAgent({ query: 'What is planned for November 17th?' }, { ...context, referenceTimestamp: '2026-11-14T10:00:00.000Z' }, { repository })
+    expect(result).toMatchObject({ status: 'no_search', answer: { text: expect.stringContaining('November 17th at 2pm') }, searchPlan: { shouldSearchWeb: false } })
+  })
+
+  it('acknowledges a new note before considering older saved memory', async () => {
+    const repository: HistoricalRepository = { retrieve: vi.fn(async () => ({
+      messages: [],
+      memoryItems: [{ id: '00000000-0000-4000-8000-000000000001', entityName: 'calendar note', content: 'The next meeting is November 17th.', validFrom: null, validTo: null, createdAt: '2026-11-14T10:00:00.000Z' }],
+      researchSnapshots: [],
+    })) }
+    const result = await executeAgent({ query: 'I have another meeting on November 20th.' }, { ...context, referenceTimestamp: '2026-11-14T10:00:00.000Z' }, { repository })
+    expect(result.answer?.text).toContain('November 20th')
+    expect(result.answer?.text).not.toContain('November 17th')
+  })
+
   it('classifies, resolves time, then retrieves history and produces a bounded plan', async () => {
     const order: string[] = []
     const repository: HistoricalRepository = { retrieve: vi.fn(async () => { order.push('retrieve'); return emptyHistory }) }
@@ -322,11 +386,12 @@ describe('orchestration sequence and errors', () => {
     expect(repository.retrieve).toHaveBeenCalledWith(expect.objectContaining({ temporalFilter: expect.objectContaining({ target: 'messages', intervals: [{ startAt: '2026-11-11T18:30:00.000Z', endAt: '2026-11-12T18:30:00.000Z' }] }) }))
   })
 
-  it('stops for ambiguous dates without retrieving history', async () => {
+  it('retrieves history for a month/day date without a year', async () => {
     const repository: HistoricalRepository = { retrieve: vi.fn(async () => emptyHistory) }
     const result = await executeAgent({ query: 'What happened on 3 November?' }, { ...context, referenceTimestamp: '2026-11-12T19:00:00.000Z' }, { repository })
-    expect(result.status).toBe('needs_clarification')
-    expect(repository.retrieve).not.toHaveBeenCalled()
+    expect(result.status).not.toBe('needs_clarification')
+    expect(repository).toBeDefined()
+    expect(repository.retrieve).toHaveBeenCalled()
   })
 
   it('stops for unsupported date-like phrases before retrieval or planning', async () => {

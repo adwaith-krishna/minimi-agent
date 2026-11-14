@@ -531,6 +531,40 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .minimi-research-shell .chat-message-user .chat-message-text { background: #e9e7e2; }
 .minimi-research-shell .message-meta { border-top-color: var(--desk-line); }
 
+/* Persisted thread switcher. It stays deliberately quiet so the conversation
+   remains the primary surface while making saved context one click away. */
+.minimi-research-shell .conversation-history-panel {
+  width: 286px;
+  flex: 0 0 286px;
+  padding: 28px 20px;
+  overflow-y: auto;
+  border-left: 1px solid var(--desk-line);
+  background: #fbfbf9;
+}
+.minimi-research-shell .conversation-history-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.minimi-research-shell .conversation-history-kicker { margin: 0 0 6px; color: #8b8983; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.minimi-research-shell .conversation-history-header h2 { margin: 0; color: var(--desk-ink); font-family: Georgia, 'Times New Roman', serif; font-size: 23px; font-weight: 400; }
+.minimi-research-shell .history-new-button { display: inline-flex; align-items: center; gap: 4px; padding: 6px 0; border: 0; background: transparent; color: var(--desk-ink); font-size: 12px; cursor: pointer; }
+.minimi-research-shell .history-new-button svg { width: 14px; height: 14px; }
+.minimi-research-shell .conversation-history-description { margin: 18px 0 22px; color: #898781; font-size: 12px; line-height: 1.55; }
+.minimi-research-shell .conversation-history-list { display: grid; gap: 8px; }
+.minimi-research-shell .conversation-history-item { display: flex; width: 100%; align-items: flex-start; gap: 10px; padding: 12px 10px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--desk-ink); text-align: left; cursor: pointer; }
+.minimi-research-shell .conversation-history-item:hover, .minimi-research-shell .conversation-history-item-active { border-color: #deddd8; background: #fff; box-shadow: 0 4px 12px rgba(40, 37, 31, .06); }
+.minimi-research-shell .conversation-history-dot { width: 7px; height: 7px; flex: 0 0 7px; margin-top: 5px; border-radius: 50%; background: #bdbab2; }
+.minimi-research-shell .conversation-history-item-active .conversation-history-dot { background: #222426; }
+.minimi-research-shell .conversation-history-copy { display: grid; min-width: 0; gap: 5px; }
+.minimi-research-shell .conversation-history-copy strong { overflow: hidden; color: #353633; font-size: 12px; font-weight: 500; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.minimi-research-shell .conversation-history-copy small { color: #99968f; font-size: 10px; }
+.minimi-research-shell .conversation-history-empty, .minimi-research-shell .chat-history-empty { margin: 0; color: #98958e; font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 1180px) {
+  .minimi-research-shell .conversation-history-panel { width: 240px; flex-basis: 240px; padding-right: 14px; padding-left: 14px; }
+}
+
+@media (max-width: 1023px) {
+  .minimi-research-shell .conversation-history-panel { display: none; }
+}
+
 @media (max-width: 767px) {
   .minimi-research-shell .chat-sidebar { width: 260px; flex-basis: 260px; align-items: stretch; padding: 18px; }
   .minimi-research-shell .chat-sidebar-header { justify-content: space-between; }
@@ -986,4 +1020,16 @@ html, body, button, input, textarea, select { font-family: Inter, system-ui, -ap
 .minimi-research-shell.minimi-research-shell .user-menu-popover { top: auto; right: auto; bottom: calc(100% + 10px); left: 0; }
 @media (max-width: 767px) {
   .minimi-research-shell.minimi-research-shell .user-menu { left: 16px; bottom: 16px; }
+}
+
+/* The current product surface is the conversation plus a persisted history
+   rail; keep the unused reference sidebar out of the desktop composition. */
+.minimi-research-shell.minimi-research-shell { display: flex; align-items: stretch; min-height: 100dvh; padding: 36px; overflow: hidden; background: var(--surface-soft); }
+.minimi-research-shell.minimi-research-shell .chat-sidebar { display: none; }
+.minimi-research-shell.minimi-research-shell .chat-main { width: auto; height: calc(100dvh - 72px); min-height: 0; margin: 0; flex: 1 1 auto; overflow: hidden; border-radius: 30px 0 0 30px; background: var(--canvas); }
+.minimi-research-shell.minimi-research-shell .conversation-history-panel { height: calc(100dvh - 72px); border-top: 0; border-right: 0; border-bottom: 0; border-radius: 0 30px 30px 0; background: var(--canvas); box-shadow: 0 9px 26px rgba(32, 21, 21, .13); }
+
+@media (max-width: 1023px) {
+  .minimi-research-shell.minimi-research-shell { padding: 0; }
+  .minimi-research-shell.minimi-research-shell .chat-main { width: 100%; height: 100dvh; border-radius: 0; }
 }

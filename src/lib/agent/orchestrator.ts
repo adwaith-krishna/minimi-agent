@@ -6,9 +6,10 @@ import type { HistoricalRepository } from './retrieval'
 import { ProviderRequestError } from './provider-errors'
 import type { ResearchReasoner, TavilyProvider } from './providers'
 import { executeSearchPlan, getSearchExecutionLimits, type SearchExecutionLimits } from './search-executor'
-import { buildHistoricalEvidence, buildWebEvidence } from './evidence'
+import { buildDeterministicWebAnswer, buildHistoricalEvidence, buildWebEvidence } from './evidence'
 import { compareHistoricalAndCurrent } from './comparison'
 import type { ResearchPersistenceRepository } from './persistence'
+import { buildDeterministicMemoryAcknowledgement, buildDeterministicMemoryAnswer } from './memory'
 
 export interface AgentDependencies {
   classifier?: IntentClassifier
@@ -45,13 +46,27 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     // A conversational or memory-only question only needs the reasoning provider.
     // Requiring web search and snapshot persistence here made ordinary questions
     // fail whenever Tavily was unavailable, even though no web call was planned.
-    if (!dependencies.reasoner || (searchPlan.shouldSearchWeb && (!dependencies.tavily || !dependencies.persistence))) {
-      return AgentExecutionSchema.parse({ status: 'failed', intent, temporal, history, searchPlan, answer: null, error: errorValue('PROVIDER_ERROR', 'Research providers are not fully configured.') })
+    if (!dependencies.reasoner && !searchPlan.shouldSearchWeb) {
+      // A new explicit note is an action, not a recall question. Acknowledge it
+      // before looking at older memory so a fresh meeting/date cannot be
+      // answered with a stale saved item.
+      const memoryAnswer = buildDeterministicMemoryAcknowledgement(query.query) ?? buildDeterministicMemoryAnswer(query.query, history)
+      if (memoryAnswer) {
+        const evidenceSources = buildHistoricalEvidence(history)
+        return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer: memoryAnswer, error: null })
+      }
+      return AgentExecutionSchema.parse({ status: 'failed', intent, temporal, history, searchPlan, answer: null, error: errorValue('PROVIDER_ERROR', 'Research providers are not configured for this request.') })
+    }
+
+    if (searchPlan.shouldSearchWeb && !dependencies.tavily) {
+      return AgentExecutionSchema.parse({ status: 'failed', intent, temporal, history, searchPlan, answer: null, error: errorValue('PROVIDER_ERROR', 'Web search is not configured.') })
     }
 
     if (!searchPlan.shouldSearchWeb) {
       const evidenceSources = buildHistoricalEvidence(history)
-      const answer = await dependencies.reasoner.generateAnswer({ query: query.query, history, sources: evidenceSources, claims: [], comparisons: [] })
+      const answer = buildDeterministicMemoryAcknowledgement(query.query)
+        ?? buildDeterministicMemoryAnswer(query.query, history)
+        ?? await dependencies.reasoner!.generateAnswer({ query: query.query, history, sources: evidenceSources, claims: [], comparisons: [] })
       return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer, error: null })
     }
 
@@ -78,11 +93,17 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     const webSources = buildWebEvidence(search.results, observedAt)
     const evidenceSources = [...buildHistoricalEvidence(history), ...webSources]
     let extractedClaims: Awaited<ReturnType<ResearchReasoner['extractClaims']>> = []
+    const deterministicWebAnswer = buildDeterministicWebAnswer(evidenceSources)
+    if (!dependencies.reasoner) {
+      const persisted = await persist([], [], evidenceSources, failures > 0 ? 'partial' : 'completed')
+      const state = failures > 0 ? 'partial' : 'completed'
+      return AgentExecutionSchema.parse({ status: state, ...base, evidenceSources, extractedClaims: [], comparisons: [], snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: deterministicWebAnswer, error: null })
+    }
     try {
       extractedClaims = webSources.length ? await dependencies.reasoner.extractClaims(query.query, webSources) : []
     } catch {
       const persisted = await persist([], [], evidenceSources, 'partial')
-      return AgentExecutionSchema.parse({ status: 'partial', ...base, evidenceSources, extractedClaims: [], comparisons: [], snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: null, error: errorValue(persistenceFailed ? 'PERSISTENCE_ERROR' : 'PROVIDER_ERROR', persistenceFailed ? 'Search evidence was found but could not be saved.' : 'Search evidence was found, but claim extraction did not complete.', { cleanupAttempted: persistenceCleanupAttempted, cleanupSucceeded: persistenceCleanupSucceeded }) })
+      return AgentExecutionSchema.parse({ status: 'partial', ...base, evidenceSources, extractedClaims: [], comparisons: [], snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: deterministicWebAnswer, error: persistenceFailed ? errorValue('PERSISTENCE_ERROR', 'Search evidence was found but could not be saved.', { cleanupAttempted: persistenceCleanupAttempted, cleanupSucceeded: persistenceCleanupSucceeded }) : null })
     }
     const comparisons = intent.intent === 'historical_current_comparison' ? compareHistoricalAndCurrent(history, extractedClaims) : []
     let answer: Awaited<ReturnType<ResearchReasoner['generateAnswer']>>
@@ -90,7 +111,7 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
       answer = await dependencies.reasoner.generateAnswer({ query: query.query, history, sources: evidenceSources, claims: extractedClaims, comparisons })
     } catch {
       const persisted = await persist(extractedClaims, comparisons, evidenceSources, 'partial')
-      return AgentExecutionSchema.parse({ status: 'partial', ...base, evidenceSources, extractedClaims, comparisons, snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: null, error: errorValue(persistenceFailed ? 'PERSISTENCE_ERROR' : 'PROVIDER_ERROR', persistenceFailed ? 'Research findings were generated but could not be saved.' : 'Research findings were generated, but answer generation did not complete.', { cleanupAttempted: persistenceCleanupAttempted, cleanupSucceeded: persistenceCleanupSucceeded }) })
+      return AgentExecutionSchema.parse({ status: 'partial', ...base, evidenceSources, extractedClaims, comparisons, snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: deterministicWebAnswer, error: persistenceFailed ? errorValue('PERSISTENCE_ERROR', 'Research findings were generated but could not be saved.', { cleanupAttempted: persistenceCleanupAttempted, cleanupSucceeded: persistenceCleanupSucceeded }) : null })
     }
     const persisted = await persist(extractedClaims, comparisons, evidenceSources, failures > 0 ? 'partial' : 'completed')
     const state = persistenceFailed || failures > 0 ? 'partial' : 'completed'

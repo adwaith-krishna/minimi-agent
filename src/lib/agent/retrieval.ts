@@ -36,6 +36,14 @@ function restoredPublicationDate(searchParams: unknown, url: string, publishedAt
 
 const STOP_WORDS = new Set(['a', 'about', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'chat', 'conversation', 'did', 'do', 'does', 'find', 'for', 'from', 'had', 'has', 'have', 'how', 'i', 'in', 'is', 'it', 'me', 'my', 'of', 'on', 'or', 'our', 'please', 'previous', 'remember', 'say', 'the', 'their', 'them', 'then', 'there', 'this', 'to', 'us', 'was', 'what', 'when', 'where', 'which', 'who', 'why', 'with', 'would', 'we', 'you', 'your', 'discuss'])
 
+// A calendar follow-up asks about the event described by an earlier turn. The
+// date in the question is valid/event time, not the timestamp at which that
+// earlier message was recorded. Filtering messages by the requested date
+// would therefore hide the very statement needed to answer the question.
+function isPersonalMemoryRecall(query: string): boolean {
+  return /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory)\b/i.test(query)
+}
+
 export function buildHistoricalSearchQuery(value: string): string {
   const words = value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
   const meaningful = words.filter((word) => word.length > 1 && !STOP_WORDS.has(word))
@@ -110,7 +118,8 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     const messageFilter = filterFor('messages')
     const memoryFilter = filterFor('memory_valid_time')
     const snapshotFilter = filterFor('research_snapshots')
-    if (messageFilter) messagesQuery = applyInterval(messagesQuery, 'created_at', messageFilter.intervals)
+    const personalMemoryRecall = isPersonalMemoryRecall(input.query)
+    if (messageFilter && !personalMemoryRecall) messagesQuery = applyInterval(messagesQuery, 'created_at', messageFilter.intervals)
     if (memoryFilter) memoriesQuery = applyInterval(memoriesQuery, 'valid_from', memoryFilter.intervals, true)
     if (snapshotFilter) snapshotsQuery = snapshotsQuery.or(snapshotFilter.intervals.map(({ startAt, endAt }) => `and(completed_at.gte.${startAt},completed_at.lt.${endAt})`).join(','))
     // No exposed rank projection/RPC exists in the current schema, so fetch a
@@ -140,7 +149,10 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     if (sourcesResult.error) throw new Error('Historical retrieval failed.')
     const sources = (sourcesResult.data ?? []).filter((source) => HttpUrlSchema.safeParse(source.url).success)
     return HistoricalRetrievalSchema.parse({
-      messages: rankHistoricalRows(messages.data ?? [], searchText, (item) => item.content, 12).map((item) => ({ id: item.id, conversationId: item.conversation_id, role: item.role, content: item.content, createdAt: item.created_at })),
+      messages: (personalMemoryRecall
+        ? (messages.data ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id)).slice(0, 50)
+        : rankHistoricalRows(messages.data ?? [], searchText, (item) => item.content, 12)
+      ).map((item) => ({ id: item.id, conversationId: item.conversation_id, role: item.role, content: item.content, createdAt: item.created_at })),
       memoryItems: rankHistoricalRows(memories.data ?? [], searchText, (item) => `${item.entity_name} ${item.content}`, 12).map((item) => ({ id: item.id, entityName: item.entity_name, content: item.content, validFrom: item.valid_from, validTo: item.valid_to, createdAt: item.created_at })),
       researchSnapshots: rankHistoricalRows(snapshots.data ?? [], searchText, (item) => item.query, 8).map((item) => ({ id: item.id, query: item.query, status: item.status, createdAt: item.created_at, claims: claims.filter((claim) => claim.snapshot_id === item.id).map((claim) => {
         const structuredData = claim.structured_data ?? {}

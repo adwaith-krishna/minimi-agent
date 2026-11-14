@@ -91,7 +91,10 @@ export function createTemporalRetrievalFilter(temporal: TemporalResolution, inte
       if (interval.endAt > previous.endAt) previous.endAt = interval.endAt
     } else merged.push({ ...interval })
   }
-  const target = /\b(?:what was true|what was valid|valid at the time|state of|status of)\b/i.test(query)
+  const personalMemoryRecall = /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory)\b/i.test(query)
+  const target = personalMemoryRecall
+    ? 'all'
+    : /\b(?:what was true|what was valid|valid at the time|state of|status of)\b/i.test(query)
     ? 'memory_valid_time'
     : intent === 'historical_conversation_recall'
       ? 'messages'
@@ -254,10 +257,13 @@ export function resolveTemporalReferences(query: string, options: { timezone?: s
     const yearText = match[3] ?? match[6]
     const text = match[0]
     if (!yearText && Number(dayText) >= 1000) continue // Month-year phrases are resolved below.
-    const year = yearText ?? '2000'
+    // When a month/day is used conversationally without a year, resolve it
+    // against the user's current local year. This supports natural queries
+    // such as “What is planned for November 17th?” and the interview prompt
+    // “What did I ask you on 3 November?” without forcing needless clarification.
+    const year = yearText ?? String(currentYear)
     const value = `${year}-${months[monthName.toLowerCase()].toString().padStart(2, '0')}-${dayText.padStart(2, '0')}`
     if (!z.iso.date().safeParse(value).success) addReference(references, text, 'ambiguous', null, null, `The date ${text} is invalid.`)
-    else if (!yearText) addReference(references, text, 'ambiguous', null, null, `The year for ${text} is not specified.`)
     else dateReference(references, text, value)
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractExplicitMemories } from '@/lib/agent/memory'
+import { buildDeterministicMemoryAnswer, extractExplicitMemories } from '@/lib/agent/memory'
 
 describe('explicit personal memory extraction', () => {
   it('captures a user-provided fact for later retrieval', () => {
@@ -17,5 +17,27 @@ describe('explicit personal memory extraction', () => {
 
   it('leaves ordinary questions for conversation history without inventing a memory', () => {
     expect(extractExplicitMemories('What is the latest news about AI?')).toEqual([])
+  })
+
+  it('captures dated meeting notes for later calendar-style follow-ups', () => {
+    expect(extractExplicitMemories('November 2 I had a meeting and the next meeting with the founder is on November 17th 2pm')).toEqual([
+      { entityType: 'fact', entityName: 'calendar note', content: "The user's planned and scheduled calendar note is: November 2 I had a meeting and the next meeting with the founder is on November 17th 2pm." },
+    ])
+  })
+
+  it('does not save a calendar question as a new memory when punctuation is missing', () => {
+    expect(extractExplicitMemories('whats planned for november 17th\\')).toEqual([])
+  })
+
+  it('answers from the earlier factual message instead of echoing the recall question', () => {
+    const answer = buildDeterministicMemoryAnswer('what is planned for nov 17?', {
+      messages: [
+        { id: '00000000-0000-4000-8000-000000000001', conversationId: '00000000-0000-4000-8000-000000000002', role: 'user', content: 'November 12 I have a date and November 17th I have a founders meeting.', createdAt: '2026-11-14T10:00:00.000Z' },
+        { id: '00000000-0000-4000-8000-000000000003', conversationId: '00000000-0000-4000-8000-000000000002', role: 'user', content: 'what is planned for nov 17?', createdAt: '2026-11-14T10:01:00.000Z' },
+      ],
+      memoryItems: [], researchSnapshots: [],
+    })
+    expect(answer?.text).toContain('founders meeting')
+    expect(answer?.text).not.toContain('what is planned for nov 17')
   })
 })
