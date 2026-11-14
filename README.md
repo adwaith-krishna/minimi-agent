@@ -1,5 +1,11 @@
 # Minimi — Temporal Memory Research Agent
 
+## Product experience
+
+The authenticated chat experience follows the current Meta-inspired design source in `DESIGN.md` while preserving Minimi's research-agent behavior. The implementation uses the documented white canvas, black marketing CTA, cobalt research action, pill navigation, rounded feature surfaces, evidence-oriented benefit cards, responsive mobile navigation, and a six-column footer that collapses for smaller screens. The proprietary Optimistic VF face is represented by the documented fallback stack (`Montserrat`, `Helvetica`, `Arial`, `Noto Sans`) because no licensed font asset is included in the repository.
+
+The visual layer does not add commerce, checkout, product catalog, or schema behavior: those elements in the design source are mapped to Minimi's research desk, memory continuity, evidence signals, and account surfaces.
+
 Minimi is an AI-powered conversational research agent that remembers past research, retrieves historical conversations by date, and compares historical findings against current web sources.
 
 ## Architecture Overview

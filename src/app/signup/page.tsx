@@ -54,24 +54,27 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   const safeErrorMessage = getSafeAuthErrorMessage(params.error)
 
   return (
-    <div className="flex min-h-full flex-col items-center justify-center px-4 py-16">
-      <div className="w-full max-w-sm">
-        <h1 className="mb-8 text-2xl font-semibold tracking-tight">Create your account</h1>
+    <div className="auth-shell">
+      <section className="auth-visual"><a className="wordmark" href="/signup" style={{ color: 'white' }}>minimi</a><h1>Look back. Check what changed. Move forward.</h1><p>Your private research workspace starts here.</p></section>
+      <div className="auth-form-wrap"><div className="auth-form">
+        <p className="panel-kicker">Start your workspace</p>
+        <h1>Create your account</h1>
+        <p>Keep your research history ready for the next question.</p>
 
         {safeErrorMessage && (
           <div
             role="alert"
-            className="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400"
+            className="auth-error"
           >
             {safeErrorMessage}
           </div>
         )}
 
-        <form action={signup} className="flex flex-col gap-4">
+        <form action={signup}>
           {/* Timezone is populated by the inline script below and validated on submission */}
           <input type="hidden" name="timezone" id="timezone-field" value="Asia/Kolkata" />
 
-          <div className="flex flex-col gap-1">
+          <div className="field">
             <label htmlFor="displayName" className="text-sm font-medium">
               Name
             </label>
@@ -85,7 +88,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
             />
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="field">
             <label htmlFor="email" className="text-sm font-medium">
               Email
             </label>
@@ -100,7 +103,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
             />
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="field">
             <label htmlFor="password" className="text-sm font-medium">
               Password
             </label>
@@ -118,19 +121,19 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
 
           <button
             type="submit"
-            className="mt-2 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="button button-primary auth-submit"
           >
             Create account
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-zinc-500">
+        <p className="auth-footer">
           Already have an account?{' '}
           <Link href="/login" className="font-medium text-zinc-900 underline dark:text-zinc-100">
             Sign in
           </Link>
         </p>
-      </div>
+      </div></div>
 
       {/* Detect browser timezone on first load; validated server-side on submit */}
       <script

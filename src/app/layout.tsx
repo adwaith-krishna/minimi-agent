@@ -2,9 +2,9 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Minimi — Temporal Memory Research Agent',
+  title: 'Minimi — Research with memory',
   description:
-    'An AI-powered conversational research agent with temporal memory and historical comparison.',
+    'A conversational research agent with temporal memory and evidence-grounded answers.',
 }
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50 font-sans">
+      <body className="min-h-full bg-white text-[#1c1e21] font-sans">
         {children}
       </body>
     </html>

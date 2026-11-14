@@ -38,23 +38,26 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const safeRedirect = getSafeRedirectUrl(params.redirectTo, '/chat')
 
   return (
-    <div className="flex min-h-full flex-col items-center justify-center px-4 py-16">
-      <div className="w-full max-w-sm">
-        <h1 className="mb-8 text-2xl font-semibold tracking-tight">Sign in to Minimi</h1>
+    <div className="auth-shell">
+      <section className="auth-visual"><a className="wordmark" href="/login" style={{ color: 'white' }}>minimi</a><h1>Research that remembers what came before.</h1><p>Temporal memory, current evidence, and clear answers in one place.</p></section>
+      <div className="auth-form-wrap"><div className="auth-form">
+        <p className="panel-kicker">Welcome back</p>
+        <h1>Sign in to Minimi</h1>
+        <p>Pick up your research where you left off.</p>
 
         {safeErrorMessage && (
           <div
             role="alert"
-            className="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400"
+            className="auth-error"
           >
             {safeErrorMessage}
           </div>
         )}
 
-        <form action={login} className="flex flex-col gap-4">
+        <form action={login}>
           <input type="hidden" name="redirectTo" value={safeRedirect} />
 
-          <div className="flex flex-col gap-1">
+          <div className="field">
             <label htmlFor="email" className="text-sm font-medium">
               Email
             </label>
@@ -69,7 +72,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             />
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="field">
             <label htmlFor="password" className="text-sm font-medium">
               Password
             </label>
@@ -86,19 +89,19 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
           <button
             type="submit"
-            className="mt-2 rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="button button-primary auth-submit"
           >
             Sign in
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-zinc-500">
+        <p className="auth-footer">
           No account?{' '}
           <Link href="/signup" className="font-medium text-zinc-900 underline dark:text-zinc-100">
             Sign up
           </Link>
         </p>
-      </div>
+      </div></div>
     </div>
   )
 }
