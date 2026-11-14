@@ -21,12 +21,18 @@ describe('explicit personal memory extraction', () => {
 
   it('captures dated meeting notes for later calendar-style follow-ups', () => {
     expect(extractExplicitMemories('November 2 I had a meeting and the next meeting with the founder is on November 17th 2pm')).toEqual([
-      { entityType: 'fact', entityName: 'calendar note', content: "The user's planned and scheduled calendar note is: November 2 I had a meeting and the next meeting with the founder is on November 17th 2pm." },
+      { entityType: 'fact', entityName: 'meeting', content: 'The user noted a personal schedule: November 2 I had a meeting and the next meeting with the founder is on November 17th 2pm Event dates: November 2, November 17th.' },
     ])
   })
 
   it('does not save a calendar question as a new memory when punctuation is missing', () => {
     expect(extractExplicitMemories('whats planned for november 17th\\')).toEqual([])
+  })
+
+  it('stores dated exams and other personal schedule items with event-date context', () => {
+    expect(extractExplicitMemories('December 2nd I have an exam', { referenceYear: 2026 })).toEqual([{
+      entityType: 'fact', entityName: 'exam', content: 'The user noted a personal schedule: December 2nd I have an exam Event date: December 2nd.', validFrom: '2026-12-02T00:00:00.000Z',
+    }])
   })
 
   it('answers from the earlier factual message instead of echoing the recall question', () => {
@@ -39,5 +45,17 @@ describe('explicit personal memory extraction', () => {
     })
     expect(answer?.text).toContain('founders meeting')
     expect(answer?.text).not.toContain('what is planned for nov 17')
+  })
+
+  it('returns all matching saved events for an upcoming-events question', () => {
+    const answer = buildDeterministicMemoryAnswer('What are my upcoming events?', {
+      messages: [],
+      memoryItems: [
+        { id: '00000000-0000-4000-8000-000000000001', entityName: 'meeting', content: 'The user noted a personal schedule: November 24th I have a PTA meeting. Event date: November 24th.', validFrom: null, validTo: null, createdAt: '2026-11-15T10:00:00.000Z' },
+        { id: '00000000-0000-4000-8000-000000000002', entityName: 'exam', content: 'The user noted a personal schedule: December 2nd I have an exam. Event date: December 2nd.', validFrom: null, validTo: null, createdAt: '2026-11-15T10:01:00.000Z' },
+      ], researchSnapshots: [],
+    })
+    expect(answer?.text).toContain('November 24th')
+    expect(answer?.text).toContain('December 2nd')
   })
 })

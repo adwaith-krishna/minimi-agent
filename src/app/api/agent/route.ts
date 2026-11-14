@@ -73,7 +73,7 @@ export async function POST(request: Request) {
         conversationId: result.conversationId ?? parsed.data.conversationId,
         userContent: parsed.data.query,
         assistantContent,
-        memories: extractExplicitMemories(parsed.data.query),
+        memories: extractExplicitMemories(parsed.data.query, { referenceYear: new Date(referenceTimestamp).getUTCFullYear() }),
       })
       responseResult = { ...result, conversationId: result.conversationId ?? persistedTurn.conversationId }
     } catch {

@@ -41,7 +41,7 @@ const STOP_WORDS = new Set(['a', 'about', 'an', 'and', 'are', 'as', 'at', 'be', 
 // earlier message was recorded. Filtering messages by the requested date
 // would therefore hide the very statement needed to answer the question.
 function isPersonalMemoryRecall(query: string): boolean {
-  return /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory)\b/i.test(query)
+  return /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i.test(query)
 }
 
 export function buildHistoricalSearchQuery(value: string): string {
@@ -73,6 +73,7 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     searchText = searchText.replace(/\s+/g, ' ').trim()
     const searchQuery = buildHistoricalSearchQuery(searchText)
     const useTextSearch = searchQuery.length > 0
+    const personalMemoryRecall = isPersonalMemoryRecall(input.query)
     type RankedCandidate = { kind: string; id: string; rank: number }
     let rankedCandidates: RankedCandidate[] | null = null
     // The RPC applies RLS as the caller and ranks in PostgreSQL, avoiding the
@@ -108,17 +109,16 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
       if (messageIds.length) messagesQuery = messagesQuery.in('id', messageIds)
       if (memoryIds.length) memoriesQuery = memoriesQuery.in('id', memoryIds)
       if (snapshotIds.length) snapshotsQuery = snapshotsQuery.in('id', snapshotIds)
-    } else if (useTextSearch && !input.conversationId) {
+    } else if (useTextSearch && !input.conversationId && !personalMemoryRecall) {
       messagesQuery = messagesQuery.textSearch('content', searchQuery, { type: 'websearch', config: 'english' })
       memoriesQuery = memoriesQuery.textSearch('content', searchQuery, { type: 'websearch', config: 'english' })
       snapshotsQuery = snapshotsQuery.textSearch('query', searchQuery, { type: 'websearch', config: 'english' })
-    } else if (!input.temporalFilter && !input.conversationId) {
+    } else if (!input.temporalFilter && !input.conversationId && !personalMemoryRecall) {
       return HistoricalRetrievalSchema.parse({ messages: [], memoryItems: [], researchSnapshots: [] })
     }
     const messageFilter = filterFor('messages')
     const memoryFilter = filterFor('memory_valid_time')
     const snapshotFilter = filterFor('research_snapshots')
-    const personalMemoryRecall = isPersonalMemoryRecall(input.query)
     if (messageFilter && !personalMemoryRecall) messagesQuery = applyInterval(messagesQuery, 'created_at', messageFilter.intervals)
     if (memoryFilter) memoriesQuery = applyInterval(memoriesQuery, 'valid_from', memoryFilter.intervals, true)
     if (snapshotFilter) snapshotsQuery = snapshotsQuery.or(snapshotFilter.intervals.map(({ startAt, endAt }) => `and(completed_at.gte.${startAt},completed_at.lt.${endAt})`).join(','))

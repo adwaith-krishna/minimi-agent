@@ -90,7 +90,7 @@ export class SupabaseConversationTurnPersistenceRepository implements Conversati
       p_conversation_id: input.conversationId ?? null,
       p_user_content: input.userContent,
       p_assistant_content: input.assistantContent,
-      p_memories: input.memories,
+      p_memories: input.memories.map(({ validFrom, validTo, ...memory }) => ({ ...memory, ...(validFrom ? { valid_from: validFrom } : {}), ...(validTo ? { valid_to: validTo } : {}) })),
     }).single() as unknown as { data: { conversation_id: string } | null; error: unknown }
     if (persisted.data?.conversation_id) return { conversationId: persisted.data.conversation_id }
     if (persisted.error && this.isMissingTurnFunction(persisted.error)) return this.persistDirectly(input)
@@ -120,7 +120,7 @@ export class SupabaseConversationTurnPersistenceRepository implements Conversati
     const assistantMessage = await client.from('messages').insert({ conversation_id: resolvedConversationId, user_id: input.userId, role: 'assistant', content: input.assistantContent }).select('id').single()
     if (assistantMessage.error) throw new Error('Conversation turn persistence failed.')
     if (input.memories.length) {
-      const memories = await client.from('memory_items').insert(input.memories.map((memory) => ({ user_id: input.userId, conversation_id: resolvedConversationId, message_id: userMessageId, entity_type: memory.entityType, entity_name: memory.entityName, content: memory.content })))
+      const memories = await client.from('memory_items').insert(input.memories.map((memory) => ({ user_id: input.userId, conversation_id: resolvedConversationId, message_id: userMessageId, entity_type: memory.entityType, entity_name: memory.entityName, content: memory.content, valid_from: memory.validFrom ?? null, valid_to: memory.validTo ?? null })))
       if (memories.error) throw new Error('Conversation turn persistence failed.')
     }
     return { conversationId: resolvedConversationId }

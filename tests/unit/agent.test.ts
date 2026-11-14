@@ -299,6 +299,13 @@ describe('historical repository ownership boundary', () => {
     expect(mock.calls).toContainEqual({ table: 'memory_items', method: 'or', args: [`and(or(valid_to.is.null,valid_to.gt.${interval.startAt}),or(valid_from.is.null,valid_from.lt.${interval.endAt}))`] })
   })
 
+  it('searches saved memory across conversations for broad personal event questions', async () => {
+    const mock = makeQueryMock({ memory_items: [{ id: 'b879e41c-5110-485f-a9be-7cd85a2b8ad9', entity_name: 'exam', content: 'The user noted a personal schedule: December 2nd I have an exam. Event date: December 2nd.', valid_from: null, valid_to: null, created_at: '2026-11-15T10:00:00.000Z' }] })
+    const result = await new SupabaseHistoricalRepository(mock.client).retrieve({ userId: context.userId, query: 'What are my upcoming events?' })
+    expect(result.memoryItems[0]?.content).toContain('December 2nd')
+    expect(mock.calls.some(({ method }) => method === 'textSearch')).toBe(false)
+  })
+
   it('filters only completed snapshot completion timestamps', async () => {
     const interval = { startAt: '2026-11-02T00:00:00.000Z', endAt: '2026-11-09T00:00:00.000Z' }
     const conversationId = '4e63cb00-88fd-4bb5-b271-e6a00e146a2b'
