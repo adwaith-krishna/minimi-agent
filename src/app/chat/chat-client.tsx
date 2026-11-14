@@ -1,8 +1,10 @@
 'use client'
 
 import { FormEvent, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { assistantText, citationLabel, parseChatResponse, safeCitationUrl, type ChatMessage } from '@/lib/agent/chat-response'
 import type { AgentExecution } from '@/lib/agent/contracts'
+import { createClient } from '@/lib/supabase/client'
 
 const statusLabel: Record<AgentExecution['status'], string> = {
   needs_clarification: 'Needs more detail',
@@ -58,6 +60,8 @@ export default function ChatClient({ email }: { email: string | null }) {
   const [conversationId, setConversationId] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const router = useRouter()
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   async function submit(event: FormEvent) {
@@ -110,6 +114,11 @@ export default function ChatClient({ email }: { email: string | null }) {
     void navigator.clipboard?.writeText(value)
   }
 
+  async function signOut() {
+    await createClient().auth.signOut()
+    router.push('/login')
+  }
+
   return (
     <div className={messages.length ? 'minimi-research-shell chat-with-messages' : 'minimi-research-shell'}>
       <aside className={sidebarOpen ? 'chat-sidebar chat-sidebar-open' : 'chat-sidebar'} aria-label="Chat history">
@@ -153,7 +162,7 @@ export default function ChatClient({ email }: { email: string | null }) {
         <header className="chat-topbar">
           <button type="button" className="chat-icon-button sidebar-toggle" aria-label="Open chat history" onClick={() => setSidebarOpen(true)}><MenuIcon /></button>
           <div className="chat-model-label"><span className="chat-app-name">Minimi Agent</span></div>
-          <div className="chat-header-actions"><button type="button" className="chat-header-new" onClick={reset}><PlusIcon /> New chat</button><button type="button" className="chat-icon-button topbar-new-chat" aria-label="Start a new chat" onClick={reset}><PlusIcon /></button></div>
+          <div className="chat-header-actions"><button type="button" className="chat-header-new" onClick={reset}><PlusIcon /> New chat</button><button type="button" className="chat-icon-button topbar-new-chat" aria-label="Start a new chat" onClick={reset}><PlusIcon /></button><div className="user-menu"><button type="button" className="user-menu-trigger" aria-label="Open account menu" aria-expanded={userMenuOpen} onClick={() => setUserMenuOpen((open) => !open)}>{(email?.[0] ?? 'U').toUpperCase()}</button>{userMenuOpen && <div className="user-menu-popover"><span>{email ?? 'Account'}</span><button type="button" onClick={() => void signOut()}>Sign out</button></div>}</div></div>
         </header>
 
         <div className={messages.length ? 'chat-content' : 'chat-content chat-content-empty'}>
