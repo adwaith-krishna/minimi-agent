@@ -15,12 +15,14 @@ export async function GET(request: Request) {
   const safeNext = getSafeRedirectUrl(rawRedirectTo, '/chat')
 
   if (code) {
-    const supabase = await createClient()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) {
-      return NextResponse.redirect(`${origin}${safeNext}`)
+    try {
+      const supabase = await createClient()
+      const { error } = await supabase.auth.exchangeCodeForSession(code)
+      if (!error) return NextResponse.redirect(`${origin}${safeNext}`)
+      logAuthDiagnostic('callback_failure', 'auth_callback_failed', error.status)
+    } catch {
+      logAuthDiagnostic('callback_failure', 'auth_callback_failed')
     }
-    logAuthDiagnostic('callback_failure', 'auth_callback_failed', error.status)
   }
 
   // Auth failed — redirect to login with a safe error code

@@ -237,6 +237,14 @@ describe('full research orchestration', () => {
     expect(mock.reasoner.generateAnswer).toHaveBeenCalledOnce()
   })
 
+  it('answers a non-current question without web or snapshot providers', async () => {
+    const mock = dependencies()
+    const output = await executeAgent({ query: 'hello there' }, context, { repository: mock.repository, reasoner: mock.reasoner })
+    expect(output.status).toBe('no_search')
+    expect(output.answer).toEqual(answer)
+    expect(mock.reasoner.generateAnswer).toHaveBeenCalledOnce()
+  })
+
   it('reports all planned search failures as failed and does not fabricate an answer', async () => {
     const mock = dependencies()
     mock.deps.planSearch = () => ({ ...basePlan, currentQuestions: ['first', 'second'] })

@@ -3,26 +3,29 @@
 import { FormEvent, useRef, useState } from 'react'
 import { assistantText, citationLabel, parseChatResponse, safeCitationUrl, type ChatMessage } from '@/lib/agent/chat-response'
 import type { AgentExecution } from '@/lib/agent/contracts'
-import { researchBenefits, researchNavItems } from '@/lib/ui/meta-design'
 
 const statusLabel: Record<AgentExecution['status'], string> = {
-  needs_clarification: 'Needs a little more detail',
-  no_search: 'Answered from your saved context',
+  needs_clarification: 'Needs more detail',
+  no_search: 'Answered from saved context',
   completed: 'Research complete',
   partial: 'Partial result',
   failed: 'Research unavailable',
 }
 
-function SearchIcon() {
-  return <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
+function PlusIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
 }
 
 function MenuIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
 }
 
-function UserIcon() {
-  return <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="3" /><path d="M5 20c.8-3.2 3.1-5 7-5s6.2 1.8 7 5" /></svg>
+function SendIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="m4 4 16 8-16 8 3-8-3-8Z" /><path d="M7 12h13" /></svg>
+}
+
+function SparkIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="m12 3 1.7 6.3L20 11l-6.3 1.7L12 19l-1.7-6.3L4 11l6.3-1.7L12 3Z" /><path d="m19 3 .6 2.4L22 6l-2.4.6L19 9l-.6-2.4L16 6l2.4-.6L19 3Z" /></svg>
 }
 
 export default function ChatClient({ email }: { email: string | null }) {
@@ -30,7 +33,7 @@ export default function ChatClient({ email }: { email: string | null }) {
   const [query, setQuery] = useState('')
   const [conversationId, setConversationId] = useState<string | undefined>()
   const [loading, setLoading] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   async function submit(event: FormEvent) {
@@ -46,9 +49,16 @@ export default function ChatClient({ email }: { email: string | null }) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: trimmed, ...(conversationId ? { conversationId } : {}) }),
       })
-      const payload: unknown = await response.json()
+      const payload: unknown = await response.json().catch(() => null)
       const result = parseChatResponse(payload)
-      if (!result) throw new Error('Minimi could not complete that request.')
+      if (!result) {
+        const message = payload && typeof payload === 'object' && 'error' in payload
+          && payload.error && typeof payload.error === 'object' && 'message' in payload.error
+          && typeof payload.error.message === 'string'
+          ? payload.error.message
+          : response.status === 401 ? 'Your session has expired. Sign in again to continue.' : `Minimi could not complete that request (${response.status}).`
+        throw new Error(message)
+      }
       setConversationId(result.conversationId ?? conversationId)
       setMessages((current) => [...current, { role: 'assistant', text: assistantText(result), result }])
     } catch (error) {
@@ -63,111 +73,84 @@ export default function ChatClient({ email }: { email: string | null }) {
     setMessages([])
     setConversationId(undefined)
     setQuery('')
+    setSidebarOpen(false)
+    inputRef.current?.focus()
+  }
+
+  function selectSuggestion(value: string) {
+    setQuery(value)
     inputRef.current?.focus()
   }
 
   return (
-    <main className="minimi-shell">
-      <div className="promo-banner">
-        <span>Research with memory, grounded in the sources that matter.</span>
-        <a href="#how-it-works">See how it works</a>
-      </div>
-
-      <header className="site-nav">
-        <a className="wordmark" href="/chat" aria-label="Minimi home">minimi</a>
-        <nav className="nav-tabs" aria-label="Primary navigation">
-          {researchNavItems.map((item) => <button key={item} type="button" className={item === 'Research' ? 'pill-tab pill-tab-active' : 'pill-tab'} onClick={() => item === 'Research' && document.getElementById('conversation')?.scrollIntoView({ behavior: 'smooth' })}>{item}</button>)}
-        </nav>
-        <div className="nav-actions">
-          <div className="search-pill" aria-label="Search is available through the prompt below"><SearchIcon /><span>Search memory</span></div>
-          <button type="button" className="icon-button" aria-label={email ? 'Signed in account' : 'Account'} title={email ?? 'Account'}><UserIcon /></button>
-          <button type="button" className="icon-button menu-button" aria-expanded={menuOpen} aria-controls="mobile-menu" aria-label="Open navigation" onClick={() => setMenuOpen((open) => !open)}><MenuIcon /></button>
+    <div className="minimi-research-shell">
+      <aside className={sidebarOpen ? 'chat-sidebar chat-sidebar-open' : 'chat-sidebar'} aria-label="Chat history">
+        <div className="chat-sidebar-header">
+          <a href="/chat" className="chat-brand"><span className="brand-mark">m</span><span>minimi</span></a>
+          <button type="button" className="chat-icon-button sidebar-close" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)}><MenuIcon /></button>
         </div>
-      </header>
-      <nav id="mobile-menu" className={menuOpen ? 'mobile-menu mobile-menu-open' : 'mobile-menu'} aria-label="Mobile navigation">
-        {researchNavItems.map((item) => <button key={item} type="button" className={item === 'Research' ? 'pill-tab pill-tab-active' : 'pill-tab'} onClick={() => { setMenuOpen(false); document.getElementById('conversation')?.scrollIntoView({ behavior: 'smooth' }) }}>{item}</button>)}
-      </nav>
-
-      <section className="hero" aria-labelledby="hero-title">
-        <p className="hero-eyebrow">Temporal memory research agent</p>
-        <h1 id="hero-title">Look back. Check what changed. Move forward.</h1>
-        <p>Minimi brings your earlier conversations into the present, then searches current sources when the answer needs a fresh check.</p>
-        <div className="hero-actions">
-          <button type="button" className="button button-primary" onClick={() => inputRef.current?.focus()}>Start an investigation</button>
-          <button type="button" className="button button-secondary" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>Explore the approach</button>
+        <button type="button" className="new-chat-button" onClick={reset}><PlusIcon /> <span>New investigation</span></button>
+        <div className="chat-history">
+          <p className="chat-history-label">Research trail</p>
+          <button type="button" className={messages.length ? 'chat-history-item chat-history-item-active' : 'chat-history-item'} onClick={() => inputRef.current?.focus()}>
+            <span>{messages.length ? 'Current investigation' : 'Start a new trail'}</span>
+          </button>
         </div>
-      </section>
-
-      <section id="how-it-works" className="content-wrap" aria-labelledby="approach-title">
-        <div className="section-heading">
-          <h2 id="approach-title">A better way to ask what changed</h2>
-          <p>Memory, time, web research, and evidence work together as one conversational flow.</p>
+        <div className="chat-sidebar-footer">
+          <div className="chat-account"><span className="chat-avatar">{(email?.[0] ?? 'M').toUpperCase()}</span><span className="chat-account-email">{email ?? 'Research workspace'}</span></div>
+          <p><span className="status-dot" /> Memory and source grounding are on.</p>
         </div>
-        <div className="benefit-grid">
-          {researchBenefits.map(([number, title, description]) => <article className="benefit-card" key={number}><span className="benefit-number">{number}</span><h3>{title}</h3><p>{description}</p></article>)}
-        </div>
-      </section>
+      </aside>
 
-      <section id="conversation" className="content-wrap chat-stage" aria-label="Minimi conversation">
-        <div className="conversation-panel">
-          <p className="panel-kicker">Your research desk</p>
-          <h2>What would you like to investigate?</h2>
+      <main className="chat-main">
+        <header className="chat-topbar">
+          <button type="button" className="chat-icon-button sidebar-toggle" aria-label="Open chat history" onClick={() => setSidebarOpen(true)}><MenuIcon /></button>
+          <div className="chat-model-label"><span>Research desk</span><small><span className="status-dot" /> live evidence mode</small></div>
+          <button type="button" className="chat-icon-button topbar-new-chat" aria-label="Start a new chat" onClick={reset}><PlusIcon /></button>
+        </header>
+
+        <div className="chat-content">
           {messages.length === 0 ? (
-            <div className="empty-state">
-              <div>
-                <div className="empty-state-mark" aria-hidden="true">✦</div>
-                <h3>Ask a question in your own words.</h3>
-                <p>Try “What did I ask you on 3 November?” or “Has the pricing changed since we compared those tools?”</p>
+            <section className="chat-empty-state" aria-labelledby="chat-heading">
+              <div className="chat-empty-icon"><SparkIcon /></div>
+              <p className="chat-kicker">A memory-first research desk</p>
+              <h1 id="chat-heading">Bring a question.<br /><em>Leave with a trail.</em></h1>
+              <p>Minimi connects what you asked before with fresh evidence, so every answer has a visible path back to its sources.</p>
+              <div className="chat-suggestions" aria-label="Suggested prompts">
+                <button type="button" onClick={() => selectSuggestion('What changed in artificial intelligence this week?')}><span>01</span> What changed this week?</button>
+                <button type="button" onClick={() => selectSuggestion('What did I research in our previous conversations?')}><span>02</span> Find a thread from memory</button>
+                <button type="button" onClick={() => selectSuggestion('Compare the current pricing of the leading project management tools.')}><span>03</span> Compare what matters now</button>
               </div>
-            </div>
+            </section>
           ) : (
-            <div className="message-list" aria-live="polite">
+            <section className="chat-message-list" aria-live="polite" aria-label="Conversation">
               {messages.map((message, index) => (
-                <article key={message.role + '-' + index} className={message.role === 'user' ? 'message message-user' : 'message message-assistant'}>
-                  <p>{message.text}</p>
-                  {message.result && <div className="message-meta">
-                    <p>{statusLabel[message.result.status]}</p>
-                    {message.result.searchExecution && <p>{message.result.searchExecution.completedCalls} of {message.result.searchExecution.attemptedCalls} source searches returned evidence.</p>}
-                    {message.result.error && message.result.status !== 'failed' && <p>Limitation: {message.result.error.message}</p>}
-                    {message.result.answer?.citations.length ? <div className="citation-list" aria-label="Sources">{message.result.answer.citations.map((citation) => { const url = safeCitationUrl(citation.url); return url ? <a key={citation.id} href={url} target="_blank" rel="noreferrer" className="citation" title={citation.title}>{citationLabel(citation)} · {citation.title}</a> : null })}</div> : null}
-                  </div>}
+                <article key={message.role + '-' + index} className={message.role === 'user' ? 'chat-message chat-message-user' : 'chat-message chat-message-assistant'}>
+                  <div className="chat-message-avatar">{message.role === 'user' ? (email?.[0] ?? 'Y').toUpperCase() : <SparkIcon />}</div>
+                  <div className="chat-message-body">
+                    <p className="chat-message-author">{message.role === 'user' ? 'You' : 'Minimi'}</p>
+                    <p className="chat-message-text">{message.text}</p>
+                    {message.result && <div className="message-meta">
+                      <span>{statusLabel[message.result.status]}</span>
+                      {message.result.searchExecution && <span>{message.result.searchExecution.completedCalls} of {message.result.searchExecution.attemptedCalls} searches returned evidence.</span>}
+                      {message.result.error && message.result.status !== 'failed' && <span>Limitation: {message.result.error.message}</span>}
+                      {message.result.answer?.citations.length ? <div className="citation-list" aria-label="Sources">{message.result.answer.citations.map((citation) => { const url = safeCitationUrl(citation.url); return url ? <a key={citation.id} href={url} target="_blank" rel="noreferrer" className="citation" title={citation.title}>{citationLabel(citation)} · {citation.title}</a> : null })}</div> : null}
+                    </div>}
+                  </div>
                 </article>
               ))}
-              {loading && <div className="message message-assistant" role="status">Searching sources and checking evidence…</div>}
-            </div>
+              {loading && <div className="chat-message chat-message-assistant" role="status"><div className="chat-message-avatar"><SparkIcon /></div><div className="chat-message-body"><p className="chat-message-author">Minimi</p><p className="chat-typing">Researching<span>.</span><span>.</span><span>.</span></p></div></div>}
+            </section>
           )}
 
-          <form onSubmit={submit} className="composer">
-            <label htmlFor="query" className="sr-only">Ask Minimi</label>
-            <div className="composer-row">
-              <textarea ref={inputRef} id="query" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event) } }} rows={2} maxLength={4000} placeholder="Ask a research question…" disabled={loading} />
-              <button type="submit" disabled={loading || !query.trim()} className="button button-buy">{loading ? 'Working…' : 'Ask Minimi'}</button>
-            </div>
-            <p className="composer-hint">Enter to send · Shift + Enter for a new line · Your sources stay private</p>
+          <form onSubmit={submit} className="chat-composer">
+            <label htmlFor="query" className="sr-only">Message Minimi</label>
+            <textarea ref={inputRef} id="query" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event) } }} rows={1} maxLength={4000} placeholder="Message Minimi" disabled={loading} />
+            <button type="submit" className="chat-send-button" aria-label="Send message" disabled={loading || !query.trim()}><SendIcon /></button>
           </form>
+          <p className="chat-disclaimer">Minimi can make mistakes. Check important information in the cited sources.</p>
         </div>
-
-        <aside className="memory-panel" aria-labelledby="memory-title">
-          <p className="panel-kicker">Designed for continuity</p>
-          <h2 id="memory-title">The answer keeps the trail.</h2>
-          <div className="memory-list">
-            <div className="memory-item"><strong>Past conversations</strong><span>Retrieve the right date and context before searching.</span></div>
-            <div className="memory-item"><strong>Research snapshots</strong><span>Preserve what was previously found instead of overwriting it.</span></div>
-            <div className="memory-item"><strong>Evidence signals</strong><span>Separate supported findings from uncertainty.</span></div>
-          </div>
-          <button type="button" className="button button-primary" style={{ marginTop: 24, width: '100%' }} onClick={reset}>New conversation</button>
-        </aside>
-      </section>
-
-      <footer className="footer-region">
-        <div><h2>minimi</h2><p>Research that remembers what came before.</p></div>
-        <div><h3>Product</h3><div className="footer-links"><a href="#conversation">Research desk</a><a href="#how-it-works">How it works</a></div></div>
-        <div><h3>Memory</h3><div className="footer-links"><a href="#conversation">Historical context</a><a href="#conversation">Saved research</a></div></div>
-        <div><h3>Evidence</h3><div className="footer-links"><a href="#conversation">Current sources</a><a href="#conversation">Citations</a></div></div>
-        <div><h3>Principles</h3><div className="footer-links"><a href="#how-it-works">Privacy first</a><a href="#how-it-works">Honest uncertainty</a></div></div>
-        <div><h3>Account</h3><div className="footer-links"><a href="/login">Sign in</a><a href="/signup">Create account</a></div></div>
-        <div className="footer-bottom"><span>© 2026 Minimi</span><span>{email ?? 'Authenticated research workspace'} · Sources are shown with each answer</span></div>
-      </footer>
-    </main>
+      </main>
+    </div>
   )
 }

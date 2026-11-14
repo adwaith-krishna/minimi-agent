@@ -2,6 +2,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/lib/supabase/types'
 import type { ClaimComparisonResult, EvidenceSource, ExtractedResearchClaim, SearchExecution } from './contracts'
+import type { RememberedMemory } from './memory'
 
 export class ResearchPersistenceError extends Error {
   constructor(readonly cleanupAttempted = false, readonly cleanupSucceeded = true) { super('Research snapshot persistence failed.'); this.name = 'ResearchPersistenceError' }
@@ -12,6 +13,16 @@ export interface ResearchPersistenceRepository {
     userId: string; conversationId?: string; query: string; observedAt: string; searchExecution: SearchExecution;
     evidenceSources: EvidenceSource[]; claims: ExtractedResearchClaim[]; comparisons: ClaimComparisonResult[]; status?: 'completed' | 'failed' | 'partial'
   }): Promise<{ snapshotId: string; conversationId: string }>
+}
+
+export interface ConversationTurnPersistenceRepository {
+  persistTurn(input: {
+    userId: string
+    conversationId?: string
+    userContent: string
+    assistantContent: string
+    memories: RememberedMemory[]
+  }): Promise<{ conversationId: string }>
 }
 
 export class SupabaseResearchPersistenceRepository implements ResearchPersistenceRepository {
@@ -67,5 +78,51 @@ export class SupabaseResearchPersistenceRepository implements ResearchPersistenc
     } catch {
       throw new ResearchPersistenceError(false, true)
     }
+  }
+}
+
+export class SupabaseConversationTurnPersistenceRepository implements ConversationTurnPersistenceRepository {
+  constructor(private readonly supabase: SupabaseClient<Database>) {}
+
+  async persistTurn(input: Parameters<ConversationTurnPersistenceRepository['persistTurn']>[0]): Promise<{ conversationId: string }> {
+    const client = this.supabase as unknown as SupabaseClient
+    const persisted = await client.rpc('persist_conversation_turn', {
+      p_conversation_id: input.conversationId ?? null,
+      p_user_content: input.userContent,
+      p_assistant_content: input.assistantContent,
+      p_memories: input.memories,
+    }).single() as unknown as { data: { conversation_id: string } | null; error: unknown }
+    if (persisted.data?.conversation_id) return { conversationId: persisted.data.conversation_id }
+    if (persisted.error && this.isMissingTurnFunction(persisted.error)) return this.persistDirectly(input)
+    throw new Error('Conversation turn persistence failed.')
+  }
+
+  private isMissingTurnFunction(error: unknown): boolean {
+    const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : ''
+    const message = error instanceof Error ? error.message : JSON.stringify(error)
+    return code === '42883' || /persist_conversation_turn|function .* does not exist|could not find the function/i.test(message)
+  }
+
+  private async persistDirectly(input: Parameters<ConversationTurnPersistenceRepository['persistTurn']>[0]): Promise<{ conversationId: string }> {
+    type InsertQuery = PromiseLike<{ data: unknown; error: unknown }> & { select(columns: string): { single(): Promise<{ data: { id: string } | null; error: unknown }> } }
+    const client = this.supabase as unknown as { from(table: string): { insert(values: unknown): InsertQuery } }
+    let conversationId = input.conversationId
+    if (!conversationId) {
+      const created = await client.from('conversations').insert({ user_id: input.userId, title: input.userContent.slice(0, 120) }).select('id').single()
+      if (created.error || !created.data) throw new Error('Conversation turn persistence failed.')
+      conversationId = created.data.id
+    }
+    const resolvedConversationId = conversationId
+    if (!resolvedConversationId) throw new Error('Conversation turn persistence failed.')
+    const userMessage = await client.from('messages').insert({ conversation_id: resolvedConversationId, user_id: input.userId, role: 'user', content: input.userContent }).select('id').single()
+    if (userMessage.error || !userMessage.data) throw new Error('Conversation turn persistence failed.')
+    const userMessageId = userMessage.data.id
+    const assistantMessage = await client.from('messages').insert({ conversation_id: resolvedConversationId, user_id: input.userId, role: 'assistant', content: input.assistantContent }).select('id').single()
+    if (assistantMessage.error) throw new Error('Conversation turn persistence failed.')
+    if (input.memories.length) {
+      const memories = await client.from('memory_items').insert(input.memories.map((memory) => ({ user_id: input.userId, conversation_id: resolvedConversationId, message_id: userMessageId, entity_type: memory.entityType, entity_name: memory.entityName, content: memory.content })))
+      if (memories.error) throw new Error('Conversation turn persistence failed.')
+    }
+    return { conversationId: resolvedConversationId }
   }
 }

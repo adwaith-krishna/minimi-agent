@@ -16,7 +16,6 @@ interface SignupPageProps {
 
 async function signup(formData: FormData) {
   'use server'
-  const supabase = await createClient()
   const email = (formData.get('email') as string)?.trim() ?? ''
   const password = (formData.get('password') as string) ?? ''
   const displayName = (formData.get('displayName') as string)?.trim() ?? ''
@@ -27,17 +26,26 @@ async function signup(formData: FormData) {
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        display_name: displayName || email.split('@')[0],
-        timezone,
+  let error: { message: string; status?: number } | null = null
+  let hasSession = false
+  try {
+    const supabase = await createClient()
+    const result = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          display_name: displayName || email.split('@')[0],
+          timezone,
+        },
+        emailRedirectTo: `${appUrl}/auth/callback`,
       },
-      emailRedirectTo: `${appUrl}/auth/callback`,
-    },
-  })
+    })
+    error = result.error
+    hasSession = Boolean(result.data.session)
+  } catch {
+    error = { message: 'Authentication provider unavailable.' }
+  }
 
   if (error) {
     const safeErrorCode = mapSupabaseErrorToCode(error.message, true)
@@ -45,7 +53,9 @@ async function signup(formData: FormData) {
     redirect(`/signup?error=${encodeURIComponent(safeErrorCode)}`)
   }
 
-  // Show confirmation page after successful signup (email confirmation flow)
+  if (hasSession) redirect('/chat')
+
+  // Supabase returns no session when email confirmation is enabled.
   redirect('/signup/confirm')
 }
 
@@ -84,7 +94,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
               type="text"
               autoComplete="name"
               placeholder="Your name"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500"
             />
           </div>
 
@@ -99,7 +109,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
               required
               autoComplete="email"
               placeholder="you@example.com"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500"
             />
           </div>
 
@@ -115,7 +125,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
               autoComplete="new-password"
               minLength={8}
               placeholder="At least 8 characters"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500"
             />
           </div>
 
@@ -129,7 +139,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
 
         <p className="auth-footer">
           Already have an account?{' '}
-          <Link href="/login" className="font-medium text-zinc-900 underline dark:text-zinc-100">
+          <Link href="/login" className="font-medium text-zinc-900 underline">
             Sign in
           </Link>
         </p>

@@ -2,9 +2,7 @@
 
 ## Product experience
 
-The authenticated chat experience follows the current Meta-inspired design source in `DESIGN.md` while preserving Minimi's research-agent behavior. The implementation uses the documented white canvas, black marketing CTA, cobalt research action, pill navigation, rounded feature surfaces, evidence-oriented benefit cards, responsive mobile navigation, and a six-column footer that collapses for smaller screens. The proprietary Optimistic VF face is represented by the documented fallback stack (`Montserrat`, `Helvetica`, `Arial`, `Noto Sans`) because no licensed font asset is included in the repository.
-
-The visual layer does not add commerce, checkout, product catalog, or schema behavior: those elements in the design source are mapped to Minimi's research desk, memory continuity, evidence signals, and account surfaces.
+The authenticated chat experience is a focused research desk: it shows a compact research trail, a source-grounded conversation, explicit evidence status, and a single composer. It is intentionally separate from the marketing/authentication surfaces. The visual layer does not add commerce, checkout, or product-catalog behavior.
 
 Minimi is an AI-powered conversational research agent that remembers past research, retrieves historical conversations by date, and compares historical findings against current web sources.
 
@@ -60,7 +58,7 @@ Open `.env.local` and fill in your credentials:
 | `OPENROUTER_CLASSIFICATION_MODEL`, `OPENROUTER_EXTRACTION_MODEL`, `OPENROUTER_ANSWER_MODEL`, `OPENROUTER_VERIFICATION_MODEL` | Optional per-operation overrides; fall back to `OPENROUTER_MODEL` | Optional server-only settings |
 | `OPENROUTER_EXTRACTION_TIMEOUT_MS` | Claim extraction timeout, bounded to 3–30 seconds (default `15000`) | Optional server-only setting |
 | `GEMINI_API_KEY` | Optional Gemini compatibility/fallback key; the Gemini route is unverified and currently unavailable in validation | [Google AI Studio](https://aistudio.google.com/app/apikey) |
-| `TAVILY_API_KEY` | Tavily Search Key (Phase 2) | [Tavily Dashboard](https://app.tavily.com) |
+| `TAVILY_API_KEY` | Tavily Search API key used for current web research | [Tavily Dashboard](https://app.tavily.com) |
 | `AGENT_MAX_REQUEST_BYTES` | Maximum `/api/agent` request body size in bytes (default `16384`; values above `1048576` use the default) | Optional server-only setting |
 | `AGENT_MAX_SEARCH_CALLS` | Per-turn Tavily call ceiling (default `8`; hard maximum `8`) | Optional server-only setting |
 | `AGENT_MAX_RESULTS_PER_CALL` | Tavily results requested per call (default `5`; hard maximum `5`) | Optional server-only setting |
@@ -88,7 +86,7 @@ The current API has no distributed rate limiter and no durable idempotency key f
 
 > **Important:** Review all SQL files in `supabase/migrations/` before applying.
 
-Apply migrations in numerical order (00001 to 00008) via the Supabase Dashboard SQL Editor or Supabase CLI:
+Apply migrations in numerical order (00001 to 00011) via the Supabase Dashboard SQL Editor or Supabase CLI:
 
 1. `supabase/migrations/00001_create_profiles.sql` — Profiles and automatic signup creation trigger
 2. `supabase/migrations/00002_create_conversations.sql` — Conversation threads and full-text search indexes
@@ -98,6 +96,9 @@ Apply migrations in numerical order (00001 to 00008) via the Supabase Dashboard 
 6. `supabase/migrations/00006_create_research_claims.sql` — Point-in-time claims extracted from research
 7. `supabase/migrations/00007_create_research_sources.sql` — Verifiable Tavily sources backing claims
 8. `supabase/migrations/00008_create_triggers_and_rls.sql` — Consistency triggers, immutability triggers, and RLS policies
+9. `supabase/migrations/00009_atomic_persistence_and_ranked_retrieval.sql` — Atomic research persistence, authenticated grants, and ranked retrieval RPC
+10. `supabase/migrations/00010_harden_trigger_function_search_paths.sql` — Hardened trigger search paths and indexes
+11. `supabase/migrations/00011_persist_conversation_turn.sql` — Atomic conversation-turn and explicit-memory persistence
 
 ### 4. Configure Supabase Auth
 

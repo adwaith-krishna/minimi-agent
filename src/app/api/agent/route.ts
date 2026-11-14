@@ -4,7 +4,8 @@ import { executeAgent } from '@/lib/agent/orchestrator'
 import { OpenRouterHttpProvider, TavilyHttpProvider } from '@/lib/agent/providers'
 import { readAgentRequestBody, getMaxAgentRequestBytes } from '@/lib/agent/request-body'
 import { SupabaseHistoricalRepository } from '@/lib/agent/retrieval'
-import { SupabaseResearchPersistenceRepository } from '@/lib/agent/persistence'
+import { SupabaseConversationTurnPersistenceRepository, SupabaseResearchPersistenceRepository } from '@/lib/agent/persistence'
+import { extractExplicitMemories } from '@/lib/agent/memory'
 import { getSearchExecutionLimits } from '@/lib/agent/search-executor'
 import { createClient } from '@/lib/supabase/server'
 import { sanitizeTimezone } from '@/lib/utils/timezone'
@@ -62,7 +63,26 @@ export async function POST(request: Request) {
       searchLimits: getSearchExecutionLimits(),
       maxSearchCalls: getSearchExecutionLimits().maxCalls,
     })
-    return NextResponse.json(result, { status: result.status === 'failed' ? 503 : 200 })
+    const assistantContent = result.answer?.text ?? result.error?.message ?? (result.status === 'needs_clarification'
+      ? 'I need a little more detail before I can answer that.'
+      : 'Minimi could not complete that request.')
+    let responseResult = result
+    try {
+      const persistedTurn = await new SupabaseConversationTurnPersistenceRepository(supabase).persistTurn({
+        userId: user.id,
+        conversationId: result.conversationId ?? parsed.data.conversationId,
+        userContent: parsed.data.query,
+        assistantContent,
+        memories: extractExplicitMemories(parsed.data.query),
+      })
+      responseResult = { ...result, conversationId: result.conversationId ?? persistedTurn.conversationId }
+    } catch {
+      responseResult = {
+        ...result,
+        error: result.error ?? { code: 'PERSISTENCE_ERROR', message: 'Minimi answered, but could not save this conversation.' },
+      }
+    }
+    return NextResponse.json(responseResult, { status: responseResult.status === 'failed' ? 503 : 200 })
   } catch {
     return errorResponse(500, 'INTERNAL_ERROR', 'Minimi could not process this request.')
   }

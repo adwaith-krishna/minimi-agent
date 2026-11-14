@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 vi.mock('server-only', () => ({}))
-import { SupabaseResearchPersistenceRepository } from '@/lib/agent/persistence'
+import { SupabaseConversationTurnPersistenceRepository, SupabaseResearchPersistenceRepository } from '@/lib/agent/persistence'
 import type { ResearchPersistenceRepository } from '@/lib/agent/persistence'
 
 const snapshotId = '8d1e4570-f5e5-4e55-a8f7-65791122a2fb'
@@ -56,5 +56,33 @@ describe('snapshot persistence lifecycle', () => {
   it('returns only the safe persistence error when the atomic RPC rejects', async () => {
     const mock = repositoryMock(new Error('private database detail'))
     await expect(mock.repository.persist(input)).rejects.toMatchObject({ name: 'ResearchPersistenceError', cleanupAttempted: false, cleanupSucceeded: true })
+  })
+})
+
+describe('conversation turn persistence', () => {
+  it('stores the user turn, assistant answer, and explicit memories through the authenticated RPC', async () => {
+    let invocation: { name: string; args: Record<string, unknown> } | undefined
+    const supabase = {
+      rpc(name: string, args: Record<string, unknown>) {
+        invocation = { name, args }
+        return { single: async () => ({ data: { conversation_id: conversationId }, error: null }) }
+      },
+    }
+    const repository = new SupabaseConversationTurnPersistenceRepository(supabase as never)
+    await expect(repository.persistTurn({
+      userId: input.userId,
+      userContent: 'My name is Uday',
+      assistantContent: 'I will remember that.',
+      memories: [{ entityType: 'fact', entityName: 'name', content: "The user's name is Uday." }],
+    })).resolves.toEqual({ conversationId })
+    expect(invocation).toEqual({
+      name: 'persist_conversation_turn',
+      args: expect.objectContaining({
+        p_conversation_id: null,
+        p_user_content: 'My name is Uday',
+        p_assistant_content: 'I will remember that.',
+        p_memories: [{ entityType: 'fact', entityName: 'name', content: "The user's name is Uday." }],
+      }),
+    })
   })
 })

@@ -69,7 +69,11 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     let rankedCandidates: RankedCandidate[] | null = null
     // The RPC applies RLS as the caller and ranks in PostgreSQL, avoiding the
     // former arbitrary 200-row recency window for ordinary text retrieval.
-    if (useTextSearch && !input.temporalFilter) {
+    // A follow-up can contain pronouns such as "them" or "that" and no
+    // repeated nouns. Within a known conversation, recent thread context is
+    // more reliable than requiring the follow-up words to match the earlier
+    // turn. Cross-conversation recall still uses the ranked FTS path.
+    if (useTextSearch && !input.temporalFilter && !input.conversationId) {
       const rpcClient = this.supabase as unknown as { rpc?: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: RankedCandidate[] | null; error: unknown }> }
       if (rpcClient.rpc) {
         const result = await rpcClient.rpc('search_historical', { p_query: searchQuery, p_conversation_id: input.conversationId ?? null, p_limit: 100 })
@@ -96,11 +100,11 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
       if (messageIds.length) messagesQuery = messagesQuery.in('id', messageIds)
       if (memoryIds.length) memoriesQuery = memoriesQuery.in('id', memoryIds)
       if (snapshotIds.length) snapshotsQuery = snapshotsQuery.in('id', snapshotIds)
-    } else if (useTextSearch) {
+    } else if (useTextSearch && !input.conversationId) {
       messagesQuery = messagesQuery.textSearch('content', searchQuery, { type: 'websearch', config: 'english' })
       memoriesQuery = memoriesQuery.textSearch('content', searchQuery, { type: 'websearch', config: 'english' })
       snapshotsQuery = snapshotsQuery.textSearch('query', searchQuery, { type: 'websearch', config: 'english' })
-    } else if (!input.temporalFilter) {
+    } else if (!input.temporalFilter && !input.conversationId) {
       return HistoricalRetrievalSchema.parse({ messages: [], memoryItems: [], researchSnapshots: [] })
     }
     const messageFilter = filterFor('messages')

@@ -15,13 +15,19 @@ interface LoginPageProps {
 
 async function login(formData: FormData) {
   'use server'
-  const supabase = await createClient()
   const email = (formData.get('email') as string)?.trim() ?? ''
   const password = (formData.get('password') as string) ?? ''
   const rawRedirectTo = formData.get('redirectTo') as string
   const safeRedirect = getSafeRedirectUrl(rawRedirectTo, '/chat')
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  let error: { message: string; status?: number } | null = null
+  try {
+    const supabase = await createClient()
+    const result = await supabase.auth.signInWithPassword({ email, password })
+    error = result.error
+  } catch {
+    error = { message: 'Authentication provider unavailable.' }
+  }
 
   if (error) {
     const safeErrorCode = mapSupabaseErrorToCode(error.message, false)
@@ -68,7 +74,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               required
               autoComplete="email"
               placeholder="you@example.com"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500"
             />
           </div>
 
@@ -83,7 +89,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               required
               autoComplete="current-password"
               placeholder="••••••••"
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500"
             />
           </div>
 
@@ -97,7 +103,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
         <p className="auth-footer">
           No account?{' '}
-          <Link href="/signup" className="font-medium text-zinc-900 underline dark:text-zinc-100">
+          <Link href="/signup" className="font-medium text-zinc-900 underline">
             Sign up
           </Link>
         </p>

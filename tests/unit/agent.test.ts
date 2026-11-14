@@ -247,6 +247,15 @@ describe('historical repository ownership boundary', () => {
     expect(ordinary.calls.some(({ method }) => method === 'gte' || method === 'lt' || method === 'or')).toBe(false)
   })
 
+  it('loads recent conversation context for pronoun-based follow-ups', async () => {
+    const conversationId = '4e63cb00-88fd-4bb5-b271-e6a00e146a2b'
+    const mock = makeQueryMock({ messages: [{ id: 'b879e41c-5110-485f-a9be-7cd85a2b8ad9', conversation_id: conversationId, role: 'user', content: 'We shortlisted five CRM tools.', created_at: '2026-11-10T12:00:00.000Z' }] })
+    const result = await new SupabaseHistoricalRepository(mock.client).retrieve({ userId: context.userId, query: 'Has any of them changed pricing?', conversationId })
+    expect(result.messages).toHaveLength(1)
+    expect(mock.calls).toContainEqual({ table: 'messages', method: 'eq', args: ['conversation_id', conversationId] })
+    expect(mock.calls.some(({ method }) => method === 'textSearch')).toBe(false)
+  })
+
   it('filters only completed snapshot completion timestamps', async () => {
     const interval = { startAt: '2026-11-02T00:00:00.000Z', endAt: '2026-11-09T00:00:00.000Z' }
     const conversationId = '4e63cb00-88fd-4bb5-b271-e6a00e146a2b'

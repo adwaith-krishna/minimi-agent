@@ -42,7 +42,10 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     const searchLimits = dependencies.searchLimits ?? getSearchExecutionLimits()
     const searchPlan = (dependencies.planSearch ?? createSearchPlan)({ intent: intent.intent, query: query.query, hasHistoricalContext, maxCalls: Math.min(dependencies.maxSearchCalls ?? searchLimits.maxCalls, searchLimits.maxCalls) })
 
-    if (!dependencies.reasoner || !dependencies.tavily || !dependencies.persistence) {
+    // A conversational or memory-only question only needs the reasoning provider.
+    // Requiring web search and snapshot persistence here made ordinary questions
+    // fail whenever Tavily was unavailable, even though no web call was planned.
+    if (!dependencies.reasoner || (searchPlan.shouldSearchWeb && (!dependencies.tavily || !dependencies.persistence))) {
       return AgentExecutionSchema.parse({ status: 'failed', intent, temporal, history, searchPlan, answer: null, error: errorValue('PROVIDER_ERROR', 'Research providers are not fully configured.') })
     }
 
@@ -53,7 +56,7 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     }
 
     const observedAt = new Date().toISOString()
-    const search = await executeSearchPlan(searchPlan, dependencies.tavily, searchLimits)
+    const search = await executeSearchPlan(searchPlan, dependencies.tavily!, searchLimits)
     const successes = search.execution.outcomes.filter((outcome) => outcome.status === 'succeeded').length
     const failures = search.execution.outcomes.filter((outcome) => outcome.status === 'failed').length
     const persist = async (claims: Parameters<ResearchPersistenceRepository['persist']>[0]['claims'], comparisons: Parameters<ResearchPersistenceRepository['persist']>[0]['comparisons'], evidenceSources: Parameters<ResearchPersistenceRepository['persist']>[0]['evidenceSources'], status?: 'completed' | 'failed' | 'partial') => {

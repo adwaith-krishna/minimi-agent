@@ -234,6 +234,15 @@ export type Database = {
     }
     Views: Record<string, never>
     Functions: {
+      persist_conversation_turn: {
+        Args: {
+          p_conversation_id: string | null
+          p_user_content: string
+          p_assistant_content: string
+          p_memories?: Json
+        }
+        Returns: { conversation_id: string; user_message_id: string; assistant_message_id: string }[]
+      }
       persist_research_snapshot: {
         Args: {
           p_conversation_id: string | null

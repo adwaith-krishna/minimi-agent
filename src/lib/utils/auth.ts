@@ -9,6 +9,10 @@ export const AUTH_ERROR_MESSAGES: Record<string, string> = {
   auth_callback_failed: 'Authentication failed. The confirmation link may be expired or already used.',
   session_expired: 'Your session has expired. Please sign in again.',
   auth_required: 'Please sign in to access this page.',
+  invalid_email: 'Enter a valid email address and try again.',
+  signup_disabled: 'Account creation is disabled in the authentication provider. Enable email signups in Supabase.',
+  signup_rate_limited: 'Too many signup attempts. Please wait a moment and try again.',
+  profile_setup_failed: 'The account could not be initialized. Check that the latest Supabase migrations are applied.',
   signup_failed: 'Unable to create your account. Please verify your details and try again.',
   auth_error: 'An unexpected authentication error occurred. Please try again.',
 }
@@ -32,6 +36,12 @@ export function getSafeAuthErrorMessage(code: string | null | undefined): string
  */
 export function mapSupabaseErrorToCode(errorMessage: string, isSignUp = false): string {
   const lower = errorMessage.toLowerCase()
+
+  if (lower.includes('provider unavailable') || lower.includes('missing required supabase') || lower.includes('configuration')) return 'auth_error'
+  if (lower.includes('signups not allowed') || lower.includes('signup is disabled') || lower.includes('sign up is disabled')) return 'signup_disabled'
+  if (lower.includes('rate limit') || lower.includes('too many requests')) return 'signup_rate_limited'
+  if (lower.includes('database error saving new user') || lower.includes('error saving new user')) return 'profile_setup_failed'
+  if (lower.includes('invalid email')) return 'invalid_email'
 
   if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
     return 'invalid_credentials'
