@@ -91,7 +91,9 @@ export function createTemporalRetrievalFilter(temporal: TemporalResolution, inte
       if (interval.endAt > previous.endAt) previous.endAt = interval.endAt
     } else merged.push({ ...interval })
   }
-  const personalMemoryRecall = /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory)\b/i.test(query)
+  const personalMemoryRecall = /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i.test(query)
+    || /\bwhat(?:'s| is| are)\s+(?:on|planned|scheduled|my upcoming)\b/i.test(query)
+    || /\bwhen is my\b/i.test(query)
   const target = personalMemoryRecall
     ? 'all'
     : /\b(?:what was true|what was valid|valid at the time|state of|status of)\b/i.test(query)

@@ -42,6 +42,8 @@ const STOP_WORDS = new Set(['a', 'about', 'an', 'and', 'are', 'as', 'at', 'be', 
 // would therefore hide the very statement needed to answer the question.
 function isPersonalMemoryRecall(query: string): boolean {
   return /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i.test(query)
+    || /\bwhat(?:'s| is| are)\s+(?:on|planned|scheduled|my upcoming)\b/i.test(query)
+    || /\bwhen is my\b/i.test(query)
 }
 
 export function buildHistoricalSearchQuery(value: string): string {

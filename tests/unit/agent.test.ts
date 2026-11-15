@@ -121,6 +121,11 @@ describe('temporal resolution', () => {
     expect(filter?.target).toBe('all')
   })
 
+  it('treats “what’s on a date” as event-time memory recall', () => {
+    const temporal = resolveTemporalReferences("What's on December 2?", { timezone: 'Asia/Kolkata', referenceTimestamp })
+    expect(createTemporalRetrievalFilter(temporal, 'general_conversational', "What's on December 2?")?.target).toBe('all')
+  })
+
   it('marks unsupported relative and month-only date expressions ambiguous without treating ordinary month words as dates', () => {
     expect(resolveTemporalReferences('We spoke a few days ago.', { timezone: 'Asia/Kolkata', referenceTimestamp }).references[0]?.kind).toBe('ambiguous')
     expect(resolveTemporalReferences('What changed during November?', { timezone: 'Asia/Kolkata', referenceTimestamp }).references[0]?.kind).toBe('ambiguous')

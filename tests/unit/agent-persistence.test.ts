@@ -81,7 +81,7 @@ describe('conversation turn persistence', () => {
         p_conversation_id: null,
         p_user_content: 'My name is Uday',
         p_assistant_content: 'I will remember that.',
-        p_memories: [{ entityType: 'fact', entityName: 'name', content: "The user's name is Uday." }],
+        p_memories: [{ entity_type: 'fact', entity_name: 'name', content: "The user's name is Uday." }],
       }),
     })
   })

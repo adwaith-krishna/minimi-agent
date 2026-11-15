@@ -90,7 +90,13 @@ export class SupabaseConversationTurnPersistenceRepository implements Conversati
       p_conversation_id: input.conversationId ?? null,
       p_user_content: input.userContent,
       p_assistant_content: input.assistantContent,
-      p_memories: input.memories.map(({ validFrom, validTo, ...memory }) => ({ ...memory, ...(validFrom ? { valid_from: validFrom } : {}), ...(validTo ? { valid_to: validTo } : {}) })),
+      p_memories: input.memories.map((memory) => ({
+        entity_type: memory.entityType,
+        entity_name: memory.entityName,
+        content: memory.content,
+        ...(memory.validFrom ? { valid_from: memory.validFrom } : {}),
+        ...(memory.validTo ? { valid_to: memory.validTo } : {}),
+      })),
     }).single() as unknown as { data: { conversation_id: string } | null; error: unknown }
     if (persisted.data?.conversation_id) return { conversationId: persisted.data.conversation_id }
     if (persisted.error && this.isMissingTurnFunction(persisted.error)) return this.persistDirectly(input)
