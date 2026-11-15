@@ -13,6 +13,8 @@ describe('explicit personal memory extraction', () => {
       { entityType: 'preference', entityName: 'preference', content: 'The user prefers dark mode.' },
     ])
     expect(extractExplicitMemories('My password is secret123')).toEqual([])
+    expect(extractExplicitMemories('I like concise answers')).toEqual([{ entityType: 'preference', entityName: 'preference', content: 'The user likes concise answers.' }])
+    expect(extractExplicitMemories('My favorite editor is VS Code')).toEqual([{ entityType: 'fact', entityName: 'favorite editor', content: "The user's favorite editor is VS Code." }])
   })
 
   it('leaves ordinary questions for conversation history without inventing a memory', () => {
@@ -36,6 +38,11 @@ describe('explicit personal memory extraction', () => {
     }])
   })
 
+  it('captures common date typos and a plain date event', () => {
+    expect(extractExplicitMemories('on december 1 i have date', { referenceYear: 2026 })[0]?.validFrom).toBe('2026-12-01T00:00:00.000Z')
+    expect(extractExplicitMemories('on januvary 22 i have another exams', { referenceYear: 2026 })[0]?.validFrom).toBe('2026-01-22T00:00:00.000Z')
+  })
+
   it('answers from the earlier factual message instead of echoing the recall question', () => {
     const answer = buildDeterministicMemoryAnswer('what is planned for nov 17?', {
       messages: [
@@ -56,6 +63,12 @@ describe('explicit personal memory extraction', () => {
 
   it('answers a missing date directly and naturally', () => {
     expect(buildDeterministicMemoryAnswer('What is planned for November 23?', { messages: [], memoryItems: [], researchSnapshots: [] })?.text).toBe('I don’t have anything recorded for November 23.')
+  })
+
+  it('maps general personal facts to the matching saved memory', () => {
+    expect(buildDeterministicMemoryAnswer('What is my name?', {
+      messages: [], memoryItems: [{ id: '00000000-0000-4000-8000-000000000001', entityName: 'name', content: "The user's name is Uday.", validFrom: null, validTo: null, createdAt: '2026-11-15T10:00:00.000Z' }], researchSnapshots: [],
+    })?.text).toContain('Your name is Uday.')
   })
 
   it('returns all matching saved events for an upcoming-events question', () => {

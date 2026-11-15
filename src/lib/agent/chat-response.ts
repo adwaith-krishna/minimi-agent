@@ -29,8 +29,12 @@ const internalHistoryReference = /\[(?:history-(?:message|memory|source|claim)):
 
 /** Keep stored provenance intact while removing internal references from dialogue. */
 export function formatAssistantText(text: string): string {
-  const paragraphs = text
+  const listReadyText = (text.match(/\b\d+\.\s/g)?.length ?? 0) >= 3
+    ? text.replace(/\s+(?=\d+\.\s)/g, '\n')
+    : text
+  const paragraphs = listReadyText
     .replace(internalHistoryReference, '')
+    .replace(/New information\.\s*No matching historical proposition was found; absence does not prove the fact is new\.\s*Current evidence:/gi, 'Current evidence:')
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.replace(/[ \t]+/g, ' ').replace(/\s+([,.;!?])/g, '$1').trim().replace(/^(?:insufficient evidence:\s*){2,}/i, 'Insufficient evidence: '))
     .filter(Boolean)

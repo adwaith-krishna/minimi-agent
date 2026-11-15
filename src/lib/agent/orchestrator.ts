@@ -7,11 +7,11 @@ import { ProviderRequestError } from './provider-errors'
 import type { ResearchReasoner, TavilyProvider } from './providers'
 import { executeSearchPlan, getSearchExecutionLimits, type SearchExecutionLimits } from './search-executor'
 import { buildDeterministicWebAnswer, buildHistoricalEvidence, buildWebEvidence } from './evidence'
-import { compareHistoricalAndCurrent } from './comparison'
+import { compareHistoricalAndCurrent, composeDeterministicComparisonAnswer } from './comparison'
 import type { ResearchPersistenceRepository } from './persistence'
 import { buildDeterministicMemoryAcknowledgement, buildDeterministicMemoryAnswer } from './memory'
 import { buildEntityAwareSearchQueries } from './query-planner'
-import { composeDeterministicComparisonAnswer } from './comparison'
+import { answerFromPersonalMemory } from './memory-rag'
 
 export interface AgentDependencies {
   classifier?: IntentClassifier
@@ -56,14 +56,17 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     const searchLimits = dependencies.searchLimits ?? getSearchExecutionLimits()
     const searchPlan = (dependencies.planSearch ?? createSearchPlan)({ intent: intent.intent, query: query.query, hasHistoricalContext, maxCalls: Math.min(dependencies.maxSearchCalls ?? searchLimits.maxCalls, searchLimits.maxCalls), searchQueries: buildEntityAwareSearchQueries(query.query, history) })
 
-    // A conversational or memory-only question only needs the reasoning provider.
+    // A conversational or memory-only question only needs a reasoning provider
+    // or the optional bounded personal-memory RAG lane.
     // Requiring web search and snapshot persistence here made ordinary questions
     // fail whenever Tavily was unavailable, even though no web call was planned.
     if (!dependencies.reasoner && !searchPlan.shouldSearchWeb) {
       // A new explicit note is an action, not a recall question. Acknowledge it
       // before looking at older memory so a fresh meeting/date cannot be
       // answered with a stale saved item.
-      const memoryAnswer = buildDeterministicMemoryAcknowledgement(query.query) ?? buildDeterministicMemoryAnswer(query.query, answerHistory)
+      const memoryAnswer = buildDeterministicMemoryAcknowledgement(query.query)
+        ?? buildDeterministicMemoryAnswer(query.query, answerHistory)
+        ?? await answerFromPersonalMemory(query.query, answerHistory)
       if (memoryAnswer) {
         const evidenceSources = buildHistoricalEvidence(answerHistory)
         return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer: memoryAnswer, error: null })
@@ -77,8 +80,10 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
 
     if (!searchPlan.shouldSearchWeb) {
       const evidenceSources = buildHistoricalEvidence(answerHistory)
+      const deterministicMemory = buildDeterministicMemoryAnswer(query.query, answerHistory)
       const answer = buildDeterministicMemoryAcknowledgement(query.query)
-        ?? buildDeterministicMemoryAnswer(query.query, answerHistory)
+        ?? deterministicMemory
+        ?? await answerFromPersonalMemory(query.query, answerHistory)
         ?? await dependencies.reasoner!.generateAnswer({ query: query.query, history: answerHistory, sources: evidenceSources, claims: [], comparisons: [] })
       return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer, error: null })
     }

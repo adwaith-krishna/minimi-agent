@@ -87,7 +87,7 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     // repeated nouns. Within a known conversation, recent thread context is
     // more reliable than requiring the follow-up words to match the earlier
     // turn. Cross-conversation recall still uses the ranked FTS path.
-    if (useTextSearch && !input.temporalFilter && !input.conversationId) {
+    if (useTextSearch && !input.temporalFilter && !input.conversationId && !personalMemoryRecall) {
       const rpcClient = this.supabase as unknown as { rpc?: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: RankedCandidate[] | null; error: unknown }> }
       if (rpcClient.rpc) {
         const result = await rpcClient.rpc('search_historical', { p_query: searchQuery, p_conversation_id: input.conversationId ?? null, p_limit: 100 })

@@ -9,7 +9,16 @@ export type RememberedMemory = {
 }
 
 const MAX_MEMORY_VALUE = 240
-const monthAliases: Record<string, string> = { jan: 'january', feb: 'february', mar: 'march', apr: 'april', jun: 'june', jul: 'july', aug: 'august', sep: 'september', sept: 'september', oct: 'october', nov: 'november', dec: 'december' }
+const monthAliases: Record<string, string> = {
+  jan: 'january', january: 'january', januvary: 'january',
+  feb: 'february', february: 'february', febuary: 'february',
+  mar: 'march', march: 'march', apr: 'april', april: 'april', may: 'may',
+  jun: 'june', june: 'june', jul: 'july', july: 'july', aug: 'august', august: 'august',
+  sep: 'september', sept: 'september', september: 'september', septemeber: 'september',
+  oct: 'october', october: 'october', nov: 'november', november: 'november',
+  dec: 'december', december: 'december', decemeber: 'december',
+}
+const monthPattern = 'january|januvary|february|febuary|march|april|may|june|july|august|september|septemeber|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec'
 
 function clean(value: string): string {
   return value.replace(/[\s.]+$/, '').trim().slice(0, MAX_MEMORY_VALUE)
@@ -21,7 +30,7 @@ function isQuestion(value: string): boolean {
 }
 
 function eventDateLabels(value: string): string[] {
-  const labels = value.match(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\b\d{4}-\d{2}-\d{2}\b/gi) ?? []
+  const labels = value.match(new RegExp(`\\b(?:${monthPattern})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\b\\d{4}-\\d{2}-\\d{2}\\b`, 'gi')) ?? []
   return [...new Set(labels.map((label) => label.replace(/\s+/g, ' ').trim()))]
 }
 
@@ -53,12 +62,13 @@ const memoryRecallPattern = /\b(?:remember|saved information|personal memory|upc
 export function isPersonalMemoryRecall(query: string): boolean {
   const personalCue = /\b(?:my|i|we|our|me|remember|saved|upcoming)\b/i.test(query)
   const memoryTopic = /\b(?:plan|planned|scheduled|schedule|meeting|appointment|calendar|events?)\b/i.test(query)
-  return memoryRecallPattern.test(query) || (personalCue && memoryTopic)
+  const personalFactQuestion = /\b(?:what(?:'s| is)|what do I|where do I|who am I|tell me about)\s+(?:my|me|I|name|location|work|job|prefer|preferences?|interests?|favorite|personal information)\b/i.test(query)
+  return memoryRecallPattern.test(query) || (personalCue && memoryTopic) || personalFactQuestion
     || /\bwhat(?:'s| is| are)\s+(?:on|planned|scheduled|my upcoming)\b/i.test(query)
 }
 
 function displayDateLabel(value: string): string {
-  return value.replace(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|sept(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/gi, (month) => {
+  return value.replace(/\b(jan(?:uary|uvary)?|feb(?:ruary|uary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember|temeber)?|sept(?:ember|emeber)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember|emeber)?)\b/gi, (month) => {
     const full = monthAliases[month.toLowerCase()] ?? month.toLowerCase()
     return full.charAt(0).toUpperCase() + full.slice(1)
   })
@@ -72,6 +82,16 @@ function displayMemoryFact(value: string): string {
     .replace(/\s+/g, ' ')
     .trim()
   fact = displayDateLabel(fact)
+    .replace(/^The user's name is\s+/i, 'Your name is ')
+    .replace(/^The user lives in\s+/i, 'You live in ')
+    .replace(/^The user is from\s+/i, 'You are from ')
+    .replace(/^The user works at\s+/i, 'You work at ')
+    .replace(/^The user studies at\s+/i, 'You study at ')
+    .replace(/^The user prefers\s+/i, 'You prefer ')
+    .replace(/^The user likes\s+/i, 'You like ')
+    .replace(/^The user loves\s+/i, 'You love ')
+    .replace(/^The user dislikes\s+/i, 'You dislike ')
+    .replace(/^The user asked Minimi to remember that\s+/i, '')
     .replace(/\bI have\b/gi, 'you have')
     .replace(/\bI am\b/gi, 'you are')
     .replace(/\bI'm\b/gi, "you're")
@@ -112,11 +132,23 @@ export function extractExplicitMemories(query: string, options: { referenceYear?
     if (detail) return [{ entityType: pattern.entityType ?? 'fact', entityName: pattern.entityName, content: `${pattern.prefix} ${detail}.` }]
   }
 
+  const preference = value.match(/^i\s+(like|love|enjoy|dislike|hate)\s+(.+)$/i)
+  if (preference?.[2]) {
+    const verb = preference[1].toLowerCase() === 'enjoy' ? 'like' : preference[1].toLowerCase()
+    return [{ entityType: 'preference', entityName: 'preference', content: `The user ${verb}s ${clean(preference[2])}.` }]
+  }
+
+  const genericFact = value.match(/^my\s+([a-z][a-z\s-]{1,40})\s+(?:is|are)\s+(.+)$/i)
+  if (genericFact?.[2] && !/(password|passcode|otp|secret|api key)/i.test(genericFact[1])) {
+    const entityName = genericFact[1].trim().replace(/\s+/g, ' ')
+    return [{ entityType: 'fact', entityName, content: `The user's ${entityName} is ${clean(genericFact[2])}.` }]
+  }
+
   // Calendar notes are user-provided facts even when they are not phrased as
   // “remember that”. Keep the original wording so a later question can match
   // names, dates, times, and the event relationship without guessing.
-  const hasDate = /\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\b\d{4}-\d{2}-\d{2}\b/i.test(value)
-  const hasEvent = /\b(meetings?|meet|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|予定|scheduled|schedule|agenda|founder|deadlines?|plans?|planned|birthdays?|trips?|flights?|presentations?)\b/i.test(value)
+  const hasDate = new RegExp(`\\b(?:${monthPattern})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\b\\d{4}-\\d{2}-\\d{2}\\b`, 'i').test(value)
+  const hasEvent = /\b(meetings?|meet|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|dates?|予定|scheduled|schedule|agenda|founder|deadlines?|plans?|planned|birthdays?|trips?|flights?|presentations?)\b/i.test(value)
   if (hasDate && hasEvent && !isQuestion(value)) {
     const dates = eventDateLabels(value)
     if (dates.length <= 1) {
@@ -139,11 +171,16 @@ export function buildDeterministicMemoryAnswer(query: string, history: Historica
   const savedUserMessages = history.messages.filter((message) => message.role === 'user'
     && !isQuestion(message.content)
     && /\b(meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|schedule|scheduled|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?)\b/i.test(message.content))
-  const savedMemories = history.memoryItems.filter((memory) => /\b(schedule|scheduled|meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?)\b/i.test(`${memory.entityName} ${memory.content}`))
+  const scheduleRecall = /\b(?:plan|planned|scheduled|schedule|meeting|appointment|calendar|event|upcoming|exam|test)\b/i.test(query)
+  const personalFactRecall = /\b(?:what(?:'s| is) my|where do I|who am I|what do I|name|live|location|work|job|prefer|preference|interest|favorite|personal information|about me)\b/i.test(query)
+  const savedMemories = history.memoryItems.filter((memory) => {
+    if (!scheduleRecall && personalFactRecall) return !/schedule|meeting|appointment|exam|event/i.test(`${memory.entityName} ${memory.content}`)
+    return /\b(schedule|scheduled|meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?|name|location|work|education|preference|interest)\b/i.test(`${memory.entityName} ${memory.content}`)
+  })
   const requestedDates = dateKeys(query)
   if (!savedMemories.length && !savedUserMessages.length) {
     const requestedLabel = eventDateLabels(query)[0]
-    return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : 'I don’t have any matching plans saved.', citations: [], claims: [] }
+    return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : personalFactRecall ? 'I don’t have that saved in your personal memory.' : 'I don’t have any matching plans saved.', citations: [], claims: [] }
   }
   const candidates = [
     ...savedMemories.map((memory) => ({ content: memory.content, createdAt: memory.createdAt })),
@@ -157,7 +194,7 @@ export function buildDeterministicMemoryAnswer(query: string, history: Historica
     .slice(0, 8)
   if (!candidates.length) {
     const requestedLabel = eventDateLabels(query)[0]
-    return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : 'I don’t have any matching plans saved.', citations: [], claims: [] }
+    return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : personalFactRecall ? 'I don’t have that saved in your personal memory.' : 'I don’t have any matching plans saved.', citations: [], claims: [] }
   }
   const rendered = candidates.map(({ content }) => displayMemoryFact(content))
     .filter((content, index, all) => all.findIndex((item) => item.toLocaleLowerCase() === content.toLocaleLowerCase()) === index)

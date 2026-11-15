@@ -20,6 +20,14 @@ describe('chat response boundary', () => {
     expect(formatAssistantText('You said   this  ,  and I found it.')).toBe('You said this, and I found it.')
   })
 
+  it('turns long numbered research lists into readable lines', () => {
+    expect(formatAssistantText('Here are apps: 1. Invoice2go 2. FreshBooks 3. Zoho Invoice [web-1]')).toContain('Invoice2go\n2. FreshBooks\n3. Zoho Invoice [web-1]')
+  })
+
+  it('cleans legacy repeated comparison prefixes without touching web citations', () => {
+    expect(formatAssistantText('• New information. No matching historical proposition was found; absence does not prove the fact is new. Current evidence: Pricing changed. [web-2]')).toBe('• Current evidence: Pricing changed. [web-2]')
+  })
+
   it('keeps citations and follow-up identifiers for a completed synthetic fixture', () => {
     // Synthetic fixture: no historical user record is implied by this test data.
     const result = parseChatResponse({ ...base, status: 'completed', answer: { text: 'Supported answer.', claims: [], citations: [{ id: 'source-1', title: 'Example source', url: 'https://example.com/article' }] } })

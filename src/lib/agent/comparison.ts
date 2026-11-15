@@ -166,15 +166,19 @@ export function composeDeterministicComparisonAnswer(comparisons: ClaimCompariso
   const citations = new Map<string, { id: string; title: string; url: string }>()
   const noHistoricalBaseline = comparisons.every((comparison) => !comparison.historicalClaim && comparison.outcome === 'insufficient_evidence')
   if (noHistoricalBaseline) {
-    const currentFacts = [...new Set(comparisons.map((comparison) => comparison.currentClaim).filter((claim): claim is string => Boolean(claim)))]
-    const refs = [...new Set(comparisons.flatMap((comparison) => comparison.sourceIds))]
-    for (const id of refs) {
-      const source = sourceById.get(id)
-      if (source?.url) citations.set(id, { id, title: source.title ?? source.domain ?? 'Source', url: source.url })
-    }
-    const facts = currentFacts.slice(0, 12).map((fact) => `• ${fact}`).join('\n\n')
-    const citationRefs = refs.map((id) => `[${id}]`).join(' ')
-    return FinalAnswerSchema.parse({ text: `I found current information, but I could not confirm what changed because the earlier conversation did not contain a comparable baseline.\n\n${facts}${citationRefs ? `\n\nSources: ${citationRefs}` : ''}`, citations: [...citations.values()], claims: [] })
+    const currentFacts = comparisons
+      .filter((comparison) => comparison.currentClaim)
+      .map((comparison) => ({ fact: comparison.currentClaim!, refs: [...new Set(comparison.sourceIds)] }))
+      .filter((item, index, all) => all.findIndex((candidate) => candidate.fact.toLowerCase() === item.fact.toLowerCase()) === index)
+      .slice(0, 12)
+    const facts = currentFacts.map(({ fact, refs }) => {
+      for (const id of refs) {
+        const source = sourceById.get(id)
+        if (source?.url) citations.set(id, { id, title: source.title ?? source.domain ?? 'Source', url: source.url })
+      }
+      return `• ${fact} ${refs.map((id) => `[${id}]`).join(' ')}`
+    }).join('\n\n')
+    return FinalAnswerSchema.parse({ text: `Here’s what I found in current sources. I couldn’t verify a change against the earlier shortlist because it wasn’t stored as a comparable baseline.\n\n${facts}`, citations: [...citations.values()], claims: [] })
   }
   const lines = comparisons.slice(0, 20).map((comparison) => {
     const refs = [...new Set(comparison.sourceIds)].map((id) => `[${id}]`).join(' ')
