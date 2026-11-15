@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { answerFromPersonalMemory } from '@/lib/agent/memory-rag'
+import { answerFromPersonalMemory, classifyPersonalQuery } from '@/lib/agent/memory-rag'
 
 const history = {
   messages: [{ id: '00000000-0000-4000-8000-000000000002', conversationId: '00000000-0000-4000-8000-000000000003', role: 'user' as const, content: 'I prefer concise answers.', createdAt: '2026-11-15T10:00:00.000Z' }],
@@ -24,5 +24,12 @@ describe('optional personal-memory RAG', () => {
     vi.stubEnv('OPENROUTER_MEMORY_MODEL', 'small/free-model')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')))
     await expect(answerFromPersonalMemory('What do I prefer?', history)).resolves.toBeNull()
+  })
+
+  it('uses the same small model as a structured personal/web/conversation router', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key')
+    vi.stubEnv('OPENROUTER_MEMORY_MODEL', 'liquid/lfm-3-1.7b:free')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ route: 'personal' }) } }] }), { status: 200 })))
+    await expect(classifyPersonalQuery('What exams do I have saved?')).resolves.toBe('personal')
   })
 })

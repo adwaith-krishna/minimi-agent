@@ -11,7 +11,7 @@ import { compareHistoricalAndCurrent, composeDeterministicComparisonAnswer } fro
 import type { ResearchPersistenceRepository } from './persistence'
 import { buildDeterministicMemoryAcknowledgement, buildDeterministicMemoryAnswer } from './memory'
 import { buildEntityAwareSearchQueries } from './query-planner'
-import { answerFromPersonalMemory } from './memory-rag'
+import { answerFromPersonalMemory, classifyPersonalQuery } from './memory-rag'
 
 export interface AgentDependencies {
   classifier?: IntentClassifier
@@ -52,6 +52,9 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     const answerHistory: HistoricalRetrieval = intent.intent === 'general_conversational'
       ? { messages: [], memoryItems: [], researchSnapshots: [] }
       : history
+    // This small model classifies the conversational lane for personal RAG;
+    // the existing search plan remains authoritative for Tavily execution.
+    const memoryRoute = await classifyPersonalQuery(query.query)
     const hasHistoricalContext = history.messages.length + history.memoryItems.length + history.researchSnapshots.length > 0
     const searchLimits = dependencies.searchLimits ?? getSearchExecutionLimits()
     const searchPlan = (dependencies.planSearch ?? createSearchPlan)({ intent: intent.intent, query: query.query, hasHistoricalContext, maxCalls: Math.min(dependencies.maxSearchCalls ?? searchLimits.maxCalls, searchLimits.maxCalls), searchQueries: buildEntityAwareSearchQueries(query.query, history) })
@@ -66,7 +69,7 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
       // answered with a stale saved item.
       const memoryAnswer = buildDeterministicMemoryAcknowledgement(query.query)
         ?? buildDeterministicMemoryAnswer(query.query, answerHistory)
-        ?? await answerFromPersonalMemory(query.query, answerHistory)
+        ?? await answerFromPersonalMemory(query.query, answerHistory, memoryRoute ?? undefined)
       if (memoryAnswer) {
         const evidenceSources = buildHistoricalEvidence(answerHistory)
         return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer: memoryAnswer, error: null })
@@ -83,7 +86,7 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
       const deterministicMemory = buildDeterministicMemoryAnswer(query.query, answerHistory)
       const answer = buildDeterministicMemoryAcknowledgement(query.query)
         ?? deterministicMemory
-        ?? await answerFromPersonalMemory(query.query, answerHistory)
+        ?? await answerFromPersonalMemory(query.query, answerHistory, memoryRoute ?? undefined)
         ?? await dependencies.reasoner!.generateAnswer({ query: query.query, history: answerHistory, sources: evidenceSources, claims: [], comparisons: [] })
       return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer, error: null })
     }

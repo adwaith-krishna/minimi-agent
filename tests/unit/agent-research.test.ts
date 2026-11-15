@@ -206,6 +206,15 @@ describe('historical and current comparison', () => {
     const result = compareHistoricalAndCurrent(history(), [current({ verification: 'uncertain' })])
     expect(result[0].outcome).toBe('insufficient_evidence')
   })
+  it('does not treat personal schedule memories as CRM comparison baselines', () => {
+    const history: HistoricalRetrieval = {
+      messages: [],
+      memoryItems: [{ id: '00000000-0000-4000-8000-000000000001', entityName: 'exam', content: 'The user noted a personal schedule: January 22nd I have another exam.', validFrom: null, validTo: null, createdAt: '2026-11-15T10:00:00.000Z' }],
+      researchSnapshots: [],
+    }
+    const comparison = compareHistoricalAndCurrent(history, [current()])
+    expect(comparison.every((item) => !item.sourceIds.some((id) => id.startsWith('history-memory:')))).toBe(true)
+  })
 })
 
 describe('full research orchestration', () => {

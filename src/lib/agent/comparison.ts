@@ -21,12 +21,11 @@ function historicalFacts(history: HistoricalRetrieval): HistoricalFact[] {
       priceType, discountConditions: stringOrNull('discountConditions'), verificationStatus: claim.verificationStatus, sourceIds: historicalClaimSources(claim),
     }
   }))
-  const memories = history.memoryItems.map((item) => ({ entityName: item.entityName, claimType: 'general' as const, proposition: null, claimText: item.content, claimValue: null, currency: null, billingPeriod: null, region: null, planOrVersion: null, priceType: 'unknown' as const, discountConditions: null, verificationStatus: 'unknown' as const, sourceIds: [`history-memory:${item.id}`] }))
-  const messages = history.messages.filter((message) => message.role !== 'system').flatMap((message) => {
+  const messages = history.messages.filter((message) => message.role !== 'system' && !/\b(?:my name is|i live|i work|i have|i am from|i prefer|personal memory|personal schedule|meeting|exams?|a date)\b/i.test(message.content)).flatMap((message) => {
     const entities = message.content.match(/\b(?:Postgres(?:ql)?|Salesforce|HubSpot|Pipedrive|SugarCRM|Zoho|CRM|Supabase|AWS|Azure|GCP)\b/gi) ?? ['historical conversation']
     return [...new Set(entities.map((entity) => entity.toLowerCase()))].map((entity) => ({ entityName: entity, claimType: /pricing|price|cost/i.test(message.content) ? 'pricing' as const : 'general' as const, proposition: null, claimText: message.content, claimValue: null, currency: null, billingPeriod: null, region: null, planOrVersion: null, priceType: 'unknown' as const, discountConditions: null, verificationStatus: 'supported' as const, sourceIds: [`history-message:${message.id}`] }))
   })
-  return [...research, ...memories, ...messages]
+  return [...research, ...messages]
 }
 
 function result(historicalClaim: string | null, currentClaim: string | null, outcome: ClaimComparisonResult['outcome'], explanation: string, sourceIds: string[]): ClaimComparisonResult {

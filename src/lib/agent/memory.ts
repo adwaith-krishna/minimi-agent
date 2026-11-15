@@ -57,6 +57,11 @@ function dateKeys(value: string): Set<string> {
   return keys
 }
 
+function monthKeys(value: string): Set<string> {
+  const matches = value.match(new RegExp(`\\b(?:${monthPattern})\\b`, 'gi')) ?? []
+  return new Set(matches.map((month) => monthAliases[month.toLowerCase()] ?? month.toLowerCase()))
+}
+
 const memoryRecallPattern = /\b(?:remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i
 
 export function isPersonalMemoryRecall(query: string): boolean {
@@ -86,6 +91,7 @@ function displayMemoryFact(value: string): string {
     .replace(/^The user lives in\s+/i, 'You live in ')
     .replace(/^The user is from\s+/i, 'You are from ')
     .replace(/^The user works at\s+/i, 'You work at ')
+    .replace(/^The user works on\s+/i, 'You work on ')
     .replace(/^The user studies at\s+/i, 'You study at ')
     .replace(/^The user prefers\s+/i, 'You prefer ')
     .replace(/^The user likes\s+/i, 'You like ')
@@ -112,7 +118,7 @@ function eventEntityName(value: string): string {
  * Extracts only explicit, low-risk facts. The complete turn is still saved in
  * messages, while these records make common personal-assistant lookups fast.
  */
-export function extractExplicitMemories(query: string, options: { referenceYear?: number } = {}): RememberedMemory[] {
+function extractSingleExplicitMemories(query: string, options: { referenceYear?: number } = {}): RememberedMemory[] {
   const value = query.trim()
   if (!value || /(password|passcode|otp|one[- ]time code|api key|secret)/i.test(value)) return []
 
@@ -121,9 +127,21 @@ export function extractExplicitMemories(query: string, options: { referenceYear?
     { expression: /^i live in\s+(.+)$/i, entityName: 'location', prefix: 'The user lives in' },
     { expression: /^i am from\s+(.+)$/i, entityName: 'origin', prefix: 'The user is from' },
     { expression: /^i work (?:at|for)\s+(.+)$/i, entityName: 'work', prefix: 'The user works at' },
+    { expression: /^i work on\s+(.+)$/i, entityName: 'work', prefix: 'The user works on' },
     { expression: /^i study at\s+(.+)$/i, entityName: 'education', prefix: 'The user studies at' },
     { expression: /^i prefer\s+(.+)$/i, entityName: 'preference', prefix: 'The user prefers', entityType: 'preference' },
     { expression: /^remember that\s+(.+)$/i, entityName: 'user-provided fact', prefix: 'The user asked Minimi to remember that' },
+  ]
+
+  const compoundFacts = value.match(/^my name is\s+(.+?)\s+and\s+i prefer\s+(.+)$/i)
+  if (compoundFacts) return [
+    { entityType: 'fact', entityName: 'name', content: `The user's name is ${clean(compoundFacts[1])}.` },
+    { entityType: 'preference', entityName: 'preference', content: `The user prefers ${clean(compoundFacts[2])}.` },
+  ]
+  const compoundWork = value.match(/^i live in\s+(.+?)\s+and\s+i work\s+(at|for|on)\s+(.+)$/i)
+  if (compoundWork) return [
+    { entityType: 'fact', entityName: 'location', content: `The user lives in ${clean(compoundWork[1])}.` },
+    { entityType: 'fact', entityName: 'work', content: `The user works ${compoundWork[2].toLowerCase()} ${clean(compoundWork[3])}.` },
   ]
 
   for (const pattern of patterns) {
@@ -166,11 +184,19 @@ export function extractExplicitMemories(query: string, options: { referenceYear?
   return []
 }
 
+export function extractExplicitMemories(query: string, options: { referenceYear?: number } = {}): RememberedMemory[] {
+  const lines = query.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean)
+  if (lines.length > 1) return lines.flatMap((line) => extractSingleExplicitMemories(line, options))
+  return extractSingleExplicitMemories(query, options)
+}
+
 export function buildDeterministicMemoryAnswer(query: string, history: HistoricalRetrieval): FinalAnswer | null {
   if (!isPersonalMemoryRecall(query)) return null
   const savedUserMessages = history.messages.filter((message) => message.role === 'user'
     && !isQuestion(message.content)
     && /\b(meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|schedule|scheduled|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?)\b/i.test(message.content))
+  const derivedFactMessages = history.messages.filter((message) => message.role === 'user')
+    .flatMap((message) => extractExplicitMemories(message.content).map((memory) => ({ content: memory.content, createdAt: message.createdAt })))
   const scheduleRecall = /\b(?:plan|planned|scheduled|schedule|meeting|appointment|calendar|event|upcoming|exam|test)\b/i.test(query)
   const personalFactRecall = /\b(?:what(?:'s| is) my|where do I|who am I|what do I|name|live|location|work|job|prefer|preference|interest|favorite|personal information|about me)\b/i.test(query)
   const savedMemories = history.memoryItems.filter((memory) => {
@@ -178,22 +204,25 @@ export function buildDeterministicMemoryAnswer(query: string, history: Historica
     return /\b(schedule|scheduled|meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?|name|location|work|education|preference|interest)\b/i.test(`${memory.entityName} ${memory.content}`)
   })
   const requestedDates = dateKeys(query)
-  if (!savedMemories.length && !savedUserMessages.length) {
-    const requestedLabel = eventDateLabels(query)[0]
+  const requestedMonths = monthKeys(query)
+  if (!savedMemories.length && !savedUserMessages.length && !derivedFactMessages.length) {
+    const requestedLabel = eventDateLabels(query)[0] ?? [...requestedMonths][0]
     return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : personalFactRecall ? 'I don’t have that saved in your personal memory.' : 'I don’t have any matching plans saved.', citations: [], claims: [] }
   }
   const candidates = [
     ...savedMemories.map((memory) => ({ content: memory.content, createdAt: memory.createdAt })),
     ...savedUserMessages.map((message) => ({ content: message.content, createdAt: message.createdAt })),
+    ...derivedFactMessages,
   ].filter((candidate, index, all) => {
     const canonical = displayMemoryFact(candidate.content).toLowerCase().replace(/(\d)(?:st|nd|rd|th)\b/g, '$1')
     return all.findIndex((item) => displayMemoryFact(item.content).toLowerCase().replace(/(\d)(?:st|nd|rd|th)\b/g, '$1') === canonical) === index
   })
-    .filter((candidate) => !requestedDates.size || [...requestedDates].some((date) => dateKeys(candidate.content).has(date)))
+    .filter((candidate) => (!requestedDates.size || [...requestedDates].some((date) => dateKeys(candidate.content).has(date)))
+      && (!requestedMonths.size || [...requestedMonths].some((month) => monthKeys(candidate.content).has(month))))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 8)
   if (!candidates.length) {
-    const requestedLabel = eventDateLabels(query)[0]
+    const requestedLabel = eventDateLabels(query)[0] ?? [...requestedMonths][0]
     return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : personalFactRecall ? 'I don’t have that saved in your personal memory.' : 'I don’t have any matching plans saved.', citations: [], claims: [] }
   }
   const rendered = candidates.map(({ content }) => displayMemoryFact(content))
@@ -207,6 +236,8 @@ export function buildDeterministicMemoryAnswer(query: string, history: Historica
 }
 
 export function buildDeterministicMemoryAcknowledgement(query: string): FinalAnswer | null {
-  if (!extractExplicitMemories(query).length) return null
-  return { text: `I’ve noted this in your personal memory: ${clean(query)}.`, citations: [], claims: [] }
+  const memories = extractExplicitMemories(query)
+  if (!memories.length) return null
+  if (memories.length === 1) return { text: `I’ve noted this in your personal memory: ${displayMemoryFact(memories[0].content)}`, citations: [], claims: [] }
+  return { text: `I’ve saved these details in your personal memory:\n\n${memories.map((memory) => `• ${displayMemoryFact(memory.content)}`).join('\n\n')}`, citations: [], claims: [] }
 }

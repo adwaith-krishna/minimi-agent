@@ -126,6 +126,63 @@ export type Database = {
           created_at?: string
         }
       }
+      memory_embeddings: {
+        Row: {
+          id: string
+          user_id: string
+          memory_item_id: string
+          embedding_model: string
+          content_hash: string
+          embedding: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          memory_item_id: string
+          embedding_model: string
+          content_hash: string
+          embedding: string
+          created_at?: string
+        }
+        Update: {
+          embedding_model?: string
+          content_hash?: string
+          embedding?: string
+        }
+      }
+      personal_context_chunks: {
+        Row: {
+          id: string
+          user_id: string
+          conversation_id: string
+          message_id: string
+          chunk_index: number
+          content: string
+          content_hash: string
+          embedding_model: string
+          embedding: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          conversation_id: string
+          message_id: string
+          chunk_index: number
+          content: string
+          content_hash: string
+          embedding_model: string
+          embedding: string
+          created_at?: string
+        }
+        Update: {
+          content?: string
+          content_hash?: string
+          embedding_model?: string
+          embedding?: string
+        }
+      }
       research_snapshots: {
         Row: {
           id: string
@@ -257,6 +314,14 @@ export type Database = {
       search_historical: {
         Args: { p_query: string; p_conversation_id?: string | null; p_limit?: number }
         Returns: { kind: string; id: string; rank: number }[]
+      }
+      match_personal_memory: {
+        Args: { query_embedding: string; match_threshold?: number; match_count?: number; embedding_model_filter?: string | null }
+        Returns: { memory_item_id: string; similarity: number }[]
+      }
+      match_personal_context: {
+        Args: { query_embedding: string; match_threshold?: number; match_count?: number; embedding_model_filter?: string | null }
+        Returns: { message_id: string; chunk_index: number; similarity: number }[]
       }
     }
     Enums: Record<string, never>

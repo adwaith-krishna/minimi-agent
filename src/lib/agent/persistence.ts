@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, Json } from '@/lib/supabase/types'
 import type { ClaimComparisonResult, EvidenceSource, ExtractedResearchClaim, SearchExecution } from './contracts'
 import type { RememberedMemory } from './memory'
+import { indexMemoryRows, indexPersonalMessage as indexPersonalMessageChunks } from './memory-embeddings'
 
 export class ResearchPersistenceError extends Error {
   constructor(readonly cleanupAttempted = false, readonly cleanupSucceeded = true) { super('Research snapshot persistence failed.'); this.name = 'ResearchPersistenceError' }
@@ -98,7 +99,14 @@ export class SupabaseConversationTurnPersistenceRepository implements Conversati
         ...(memory.validTo ? { valid_to: memory.validTo } : {}),
       })),
     }).single() as unknown as { data: { conversation_id: string } | null; error: unknown }
-    if (persisted.data?.conversation_id) return { conversationId: persisted.data.conversation_id }
+    if (persisted.data?.conversation_id) {
+      const turn = persisted.data as { conversation_id: string; user_message_id?: string }
+      if (turn.user_message_id) {
+        await this.indexMemories(input.userId, turn.user_message_id)
+        await this.indexPersonalMessage(input.userId, turn.conversation_id, turn.user_message_id, input.userContent)
+      }
+      return { conversationId: persisted.data.conversation_id }
+    }
     if (persisted.error && this.isMissingTurnFunction(persisted.error)) return this.persistDirectly(input)
     throw new Error('Conversation turn persistence failed.')
   }
@@ -128,7 +136,29 @@ export class SupabaseConversationTurnPersistenceRepository implements Conversati
     if (input.memories.length) {
       const memories = await client.from('memory_items').insert(input.memories.map((memory) => ({ user_id: input.userId, conversation_id: resolvedConversationId, message_id: userMessageId, entity_type: memory.entityType, entity_name: memory.entityName, content: memory.content, valid_from: memory.validFrom ?? null, valid_to: memory.validTo ?? null })))
       if (memories.error) throw new Error('Conversation turn persistence failed.')
+      await this.indexMemories(input.userId, userMessageId)
     }
+    await indexPersonalMessageChunks(this.supabase, { userId: input.userId, conversationId: resolvedConversationId, messageId: userMessageId, content: input.userContent })
     return { conversationId: resolvedConversationId }
+  }
+
+  private async indexMemories(userId: string, messageId: string): Promise<void> {
+    try {
+      const client = this.supabase as unknown as {
+        from(table: string): {
+          select(columns: string): { eq(column: string, value: string): { order(column: string, options: { ascending: boolean }): Promise<{ data: Array<{ id: string; content: string }> | null; error: unknown }> } }
+          upsert(values: unknown[], options: { onConflict: string }): Promise<{ error: unknown }>
+        }
+      }
+      const memoriesResult = await client.from('memory_items').select('id, content').eq('message_id', messageId).order('created_at', { ascending: true })
+      if (memoriesResult.error || !memoriesResult.data?.length) return
+      await indexMemoryRows(this.supabase, userId, memoriesResult.data)
+    } catch {
+      // Deterministic and full-text memory retrieval remain available.
+    }
+  }
+
+  private async indexPersonalMessage(userId: string, conversationId: string, messageId: string, content: string): Promise<void> {
+    await indexPersonalMessageChunks(this.supabase, { userId, conversationId, messageId, content })
   }
 }

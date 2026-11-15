@@ -43,6 +43,17 @@ describe('explicit personal memory extraction', () => {
     expect(extractExplicitMemories('on januvary 22 i have another exams', { referenceYear: 2026 })[0]?.validFrom).toBe('2026-01-22T00:00:00.000Z')
   })
 
+  it('extracts each line from a multiline personal-context paste', () => {
+    expect(extractExplicitMemories('My name is Uday and I prefer concise answers.\n\nI live in Bengaluru and I work on AI products.\n\nOn November 23, I have exams.')).toHaveLength(5)
+  })
+
+  it('maps month-only schedule questions to events in that month', () => {
+    const answer = buildDeterministicMemoryAnswer('What do I have planned in January?', {
+      messages: [], memoryItems: [{ id: '00000000-0000-4000-8000-000000000001', entityName: 'exam', content: 'The user noted a personal schedule: January 22nd I have another exam. Event date: January 22nd.', validFrom: null, validTo: null, createdAt: '2026-11-15T10:00:00.000Z' }], researchSnapshots: [],
+    })
+    expect(answer?.text).toContain('January 22nd')
+  })
+
   it('answers from the earlier factual message instead of echoing the recall question', () => {
     const answer = buildDeterministicMemoryAnswer('what is planned for nov 17?', {
       messages: [
@@ -69,6 +80,13 @@ describe('explicit personal memory extraction', () => {
     expect(buildDeterministicMemoryAnswer('What is my name?', {
       messages: [], memoryItems: [{ id: '00000000-0000-4000-8000-000000000001', entityName: 'name', content: "The user's name is Uday.", validFrom: null, validTo: null, createdAt: '2026-11-15T10:00:00.000Z' }], researchSnapshots: [],
     })?.text).toContain('Your name is Uday.')
+  })
+
+  it('derives a personal fact from an older user message when structured memory is missing', () => {
+    const answer = buildDeterministicMemoryAnswer('What is my name?', {
+      messages: [{ id: '00000000-0000-4000-8000-000000000001', conversationId: '00000000-0000-4000-8000-000000000002', role: 'user', content: 'My name is Uday and I prefer concise answers.', createdAt: '2026-11-15T10:00:00.000Z' }], memoryItems: [], researchSnapshots: [],
+    })
+    expect(answer?.text).toContain('Your name is Uday.')
   })
 
   it('returns all matching saved events for an upcoming-events question', () => {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 import { HistoricalRetrievalSchema, HttpUrlSchema, PublishedDateSchema, type HistoricalRetrieval, type PublishedDate, type TemporalRetrievalFilter } from './contracts'
+import { createMemoryEmbeddings, indexMemoryRows, indexPersonalMessage } from './memory-embeddings'
 
 export interface HistoricalRepository {
   retrieve(input: { userId: string; query: string; conversationId?: string; temporalFilter?: TemporalRetrievalFilter; temporalTerms?: string[] }): Promise<HistoricalRetrieval>
@@ -79,6 +80,23 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     const searchQuery = buildHistoricalSearchQuery(searchText)
     const useTextSearch = searchQuery.length > 0
     const personalMemoryRecall = isPersonalMemoryRecall(input.query)
+    let vectorMemoryIds: string[] | null = null
+    let vectorMessageIds: string[] | null = null
+    if (personalMemoryRecall && process.env.OPENROUTER_MEMORY_EMBEDDING_MODEL && process.env.OPENROUTER_API_KEY) {
+      const queryEmbedding = await createMemoryEmbeddings([input.query])
+      if (queryEmbedding?.embeddings[0]) {
+        const vectorClient = this.supabase as unknown as { rpc?: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: Array<{ memory_item_id: string; similarity: number }> | null; error: unknown }> }
+        if (vectorClient.rpc) {
+          const vectorResult = await vectorClient.rpc('match_personal_memory', { query_embedding: `[${queryEmbedding.embeddings[0].join(',')}]`, match_threshold: 0.35, match_count: 12, embedding_model_filter: queryEmbedding.model })
+          if (!vectorResult.error && vectorResult.data?.length) vectorMemoryIds = vectorResult.data.map((item) => item.memory_item_id)
+        }
+        const contextClient = this.supabase as unknown as { rpc?: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: Array<{ message_id: string; chunk_index: number; similarity: number }> | null; error: unknown }> }
+        if (contextClient.rpc) {
+          const vectorResult = await contextClient.rpc('match_personal_context', { query_embedding: `[${queryEmbedding.embeddings[0].join(',')}]`, match_threshold: 0.35, match_count: 12, embedding_model_filter: queryEmbedding.model })
+          if (!vectorResult.error && vectorResult.data?.length) vectorMessageIds = [...new Set(vectorResult.data.map((item) => item.message_id))]
+        }
+      }
+    }
     type RankedCandidate = { kind: string; id: string; rank: number }
     let rankedCandidates: RankedCandidate[] | null = null
     // The RPC applies RLS as the caller and ranks in PostgreSQL, avoiding the
@@ -107,6 +125,8 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     let memoriesQuery = this.supabase.from('memory_items').select('id, entity_name, content, valid_from, valid_to, created_at').eq('user_id', input.userId)
     let snapshotsQuery = this.supabase.from('research_snapshots').select('id, query, status, created_at, completed_at, search_params').eq('user_id', input.userId).eq('status', 'completed')
     const candidateIds = (kind: RankedCandidate['kind']) => rankedCandidates?.filter((candidate) => candidate.kind === kind).map((candidate) => candidate.id) ?? []
+    if (vectorMemoryIds) memoriesQuery = memoriesQuery.in('id', vectorMemoryIds)
+    if (vectorMessageIds) messagesQuery = messagesQuery.in('id', vectorMessageIds)
     if (rankedCandidates) {
       const messageIds = candidateIds('message')
       const memoryIds = candidateIds('memory_item')
@@ -145,6 +165,12 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
       target === 'messages' || target === 'memory_valid_time' || (rankedCandidates !== null && candidateIds('research_snapshot').length === 0) ? Promise.resolve({ data: [], error: null }) : snapshotsQuery,
     ]) as unknown as [QueryResult<MessageRow>, QueryResult<MemoryRow>, QueryResult<SnapshotRow>]
     if (messages.error || memories.error || snapshots.error) throw new Error('Historical retrieval failed.')
+    if (personalMemoryRecall && memories.data?.length) void indexMemoryRows(this.supabase, input.userId, memories.data)
+    if (personalMemoryRecall && messages.data?.length) {
+      void Promise.all(messages.data.filter((message) => message.role === 'user').slice(0, 32).map((message) => indexPersonalMessage(this.supabase, {
+        userId: input.userId, conversationId: message.conversation_id, messageId: message.id, content: message.content,
+      })))
+    }
     const snapshotIds = (snapshots.data ?? []).map((item) => item.id)
     const claimsResult = (snapshotIds.length ? await this.supabase.from('research_claims').select('id, snapshot_id, entity_name, claim_type, claim_text, claim_value, structured_data, valid_at, recorded_at').in('snapshot_id', snapshotIds).order('recorded_at', { ascending: false }).order('id', { ascending: true }).limit(40) : { data: [], error: null }) as unknown as QueryResult<ClaimRow>
     if (claimsResult.error) throw new Error('Historical retrieval failed.')
@@ -155,11 +181,17 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
     const sources = (sourcesResult.data ?? []).filter((source) => HttpUrlSchema.safeParse(source.url).success)
     return HistoricalRetrievalSchema.parse({
       messages: (personalMemoryRecall
-        ? (messages.data ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id)).slice(0, 50)
+        ? (messages.data ?? []).sort((a, b) => {
+          const vectorRank = vectorMessageIds ? (vectorMessageIds.indexOf(a.id) - vectorMessageIds.indexOf(b.id)) : 0
+          return vectorRank || b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id)
+        }).slice(0, 50)
         : rankHistoricalRows(messages.data ?? [], searchText, (item) => item.content, 12)
       ).map((item) => ({ id: item.id, conversationId: item.conversation_id, role: item.role, content: item.content, createdAt: item.created_at })),
       memoryItems: (personalMemoryRecall
-        ? [...(memories.data ?? [])].sort((a, b) => (a.valid_from ?? '9999-12-31').localeCompare(b.valid_from ?? '9999-12-31') || b.created_at.localeCompare(a.created_at)).slice(0, 50)
+        ? [...(memories.data ?? [])].sort((a, b) => {
+          const vectorRank = vectorMemoryIds ? (vectorMemoryIds.indexOf(a.id) - vectorMemoryIds.indexOf(b.id)) : 0
+          return vectorRank || (a.valid_from ?? '9999-12-31').localeCompare(b.valid_from ?? '9999-12-31') || b.created_at.localeCompare(a.created_at)
+        }).slice(0, 50)
         : rankHistoricalRows(memories.data ?? [], searchText, (item) => `${item.entity_name} ${item.content}`, 12)
       ).map((item) => ({ id: item.id, entityName: item.entity_name, content: item.content, validFrom: item.valid_from, validTo: item.valid_to, createdAt: item.created_at })),
       researchSnapshots: rankHistoricalRows(snapshots.data ?? [], searchText, (item) => item.query, 8).map((item) => ({ id: item.id, query: item.query, status: item.status, createdAt: item.created_at, claims: claims.filter((claim) => claim.snapshot_id === item.id).map((claim) => {
