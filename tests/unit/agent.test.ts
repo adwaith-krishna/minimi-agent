@@ -63,6 +63,11 @@ describe('agent contracts and intent classification', () => {
     expect((await classifyIntent('Has CRM pricing changed since our last shortlist?', noisyClassifier)).intent).toBe('historical_current_comparison')
   })
 
+  it('does not treat generic meeting software questions as personal-memory recall', () => {
+    expect(classifyIntentDeterministically('What are the best meeting transcription tools?').intent).toBe('general_conversational')
+    expect(classifyIntentDeterministically('What meetings do I have next week?').intent).toBe('historical_conversation_recall')
+  })
+
   it('routes the three evaluation scenarios to the required history/web paths', () => {
     const crm = classifyIntentDeterministically('On Monday we shortlisted 5 CRM tools for a 20-person sales team. Has any of them changed pricing or shipped something big since?')
     expect(crm.intent).toBe('historical_current_comparison')
@@ -362,6 +367,15 @@ describe('historical repository ownership boundary', () => {
 })
 
 describe('orchestration sequence and errors', () => {
+  it('captures an explicit calendar note before provider classification or retrieval', async () => {
+    const repository: HistoricalRepository = { retrieve: vi.fn(async () => { throw new Error('retrieval should not run') }) }
+    const classifier = { classify: vi.fn(async () => { throw new Error('provider should not run') }) }
+    const result = await executeAgent({ query: 'On November 23 I have exams.' }, { ...context, referenceTimestamp: '2026-11-15T10:00:00.000Z' }, { repository, classifier })
+    expect(result).toMatchObject({ status: 'no_search', answer: { text: expect.stringContaining('November 23') } })
+    expect(repository.retrieve).not.toHaveBeenCalled()
+    expect(classifier.classify).not.toHaveBeenCalled()
+  })
+
   it('answers a personal calendar follow-up from saved memory without a reasoning provider', async () => {
     const repository: HistoricalRepository = { retrieve: vi.fn(async () => ({
       messages: [],
@@ -426,7 +440,7 @@ describe('orchestration sequence and errors', () => {
     const repository: HistoricalRepository = { retrieve: vi.fn(async () => emptyHistory) }
     const classifier = { classify: vi.fn(async () => { throw new Error('provider HTTP 429 secret') }) }
     const result = await executeAgent({ query: 'latest news' }, { ...context, referenceTimestamp: '2026-11-12T19:00:00.000Z' }, { classifier, repository })
-    expect(result).toMatchObject({ status: 'failed', error: { code: 'PROVIDER_ERROR', message: 'Research providers are temporarily unavailable.' } })
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'PROVIDER_ERROR', message: 'Web search is not configured.' } })
     expect(JSON.stringify(result)).not.toContain('secret')
   })
 

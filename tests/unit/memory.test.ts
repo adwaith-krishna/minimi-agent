@@ -21,7 +21,8 @@ describe('explicit personal memory extraction', () => {
 
   it('captures dated meeting notes for later calendar-style follow-ups', () => {
     expect(extractExplicitMemories('November 2 I had a meeting and the next meeting with the founder is on November 17th 2pm')).toEqual([
-      { entityType: 'fact', entityName: 'meeting', content: 'The user noted a personal schedule: November 2 I had a meeting and the next meeting with the founder is on November 17th 2pm Event dates: November 2, November 17th.' },
+      { entityType: 'fact', entityName: 'meeting', content: 'The user noted a personal schedule: November 2 I had a meeting and the next meeting with the founder Event date: November 2.' },
+      { entityType: 'fact', entityName: 'personal schedule', content: 'The user noted a personal schedule: November 17th 2pm Event date: November 17th.' },
     ])
   })
 
@@ -45,6 +46,16 @@ describe('explicit personal memory extraction', () => {
     })
     expect(answer?.text).toContain('founders meeting')
     expect(answer?.text).not.toContain('what is planned for nov 17')
+  })
+
+  it('does not expose saved schedule memory to unrelated conversational questions', () => {
+    expect(buildDeterministicMemoryAnswer('What do you think of black holes?', {
+      messages: [], memoryItems: [{ id: '00000000-0000-4000-8000-000000000001', entityName: 'meeting', content: 'The user noted a personal schedule: December 2nd I have a meeting.', validFrom: null, validTo: null, createdAt: '2026-11-15T10:00:00.000Z' }], researchSnapshots: [],
+    })).toBeNull()
+  })
+
+  it('answers a missing date directly and naturally', () => {
+    expect(buildDeterministicMemoryAnswer('What is planned for November 23?', { messages: [], memoryItems: [], researchSnapshots: [] })?.text).toBe('I don’t have anything recorded for November 23.')
   })
 
   it('returns all matching saved events for an upcoming-events question', () => {

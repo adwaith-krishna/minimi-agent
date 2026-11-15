@@ -24,6 +24,7 @@ function authProviderUnavailable(error: unknown): boolean {
 }
 
 export async function POST(request: Request) {
+  const requestStartedAt = performance.now()
   try {
     const referenceTimestamp = new Date().toISOString()
     const bodyResult = await readAgentRequestBody(request, getMaxAgentRequestBytes())
@@ -82,8 +83,15 @@ export async function POST(request: Request) {
         error: result.error ?? { code: 'PERSISTENCE_ERROR', message: 'Minimi answered, but could not save this conversation.' },
       }
     }
-    return NextResponse.json(responseResult, { status: responseResult.status === 'failed' ? 503 : 200 })
+    const responseStatus = responseResult.status === 'failed' ? 503 : 200
+    const response = NextResponse.json(responseResult, { status: responseStatus })
+    const totalDurationMs = Math.round(performance.now() - requestStartedAt)
+    const searchDurationMs = responseResult.searchExecution?.totalDurationMs ?? 0
+    response.headers.set('Server-Timing', `agent;dur=${totalDurationMs}, search;dur=${searchDurationMs}`)
+    console.info('[agent.metrics]', JSON.stringify({ status: responseResult.status, intent: responseResult.intent?.intent ?? null, totalDurationMs, searchDurationMs, attemptedSearches: responseResult.searchExecution?.attemptedCalls ?? 0, completedSearches: responseResult.searchExecution?.completedCalls ?? 0 }))
+    return response
   } catch {
+    console.warn('[agent.metrics]', JSON.stringify({ status: 'internal_error', totalDurationMs: Math.round(performance.now() - requestStartedAt) }))
     return errorResponse(500, 'INTERNAL_ERROR', 'Minimi could not process this request.')
   }
 }

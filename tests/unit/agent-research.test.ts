@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { compareHistoricalAndCurrent } from '@/lib/agent/comparison'
+import { compareHistoricalAndCurrent, composeDeterministicComparisonAnswer } from '@/lib/agent/comparison'
 import { executeAgent, type AgentDependencies } from '@/lib/agent/orchestrator'
 import { executeSearchPlan, getSearchExecutionLimits, type TavilySearchClient } from '@/lib/agent/search-executor'
 import type { EvidenceSource, ExtractedResearchClaim, FinalAnswer, HistoricalRetrieval, SearchPlan, WebSearchResult } from '@/lib/agent/contracts'
@@ -60,6 +60,12 @@ describe('bounded search executor', () => {
 })
 
 describe('historical and current comparison', () => {
+  it('composes a concise comparison answer with only valid web citations', () => {
+    const answer = composeDeterministicComparisonAnswer([{ historicalClaim: '$10 monthly', currentClaim: '$15 monthly', outcome: 'changed', explanation: 'The comparable price amounts differ.', sourceIds: ['history-message:old', 'web-1'] }], [{ id: 'web-1', kind: 'web', url: 'https://example.com/pricing', title: 'Pricing', snippet: 'Pricing', domain: 'example.com', publishedAt: null, observedAt: '2026-11-15T00:00:00.000Z', score: 0.9, effectiveAt: null }])
+    expect(answer?.text).toContain('Changed.')
+    expect(answer?.text).toContain('[history-message:old]')
+    expect(answer?.citations).toEqual([{ id: 'web-1', title: 'Pricing', url: 'https://example.com/pricing' }])
+  })
   const current = (overrides: Partial<ExtractedResearchClaim> = {}): ExtractedResearchClaim => ({ entityName: 'Acme', claimType: 'pricing', proposition: 'Acme Pro subscription', claimText: '$20 USD monthly', claimValue: '20', currency: 'USD', billingPeriod: 'monthly', region: 'US', planOrVersion: 'Pro', priceType: 'standard', discountConditions: null, effectiveAt: null, temporalStatus: 'current', confidence: 'high', verification: 'supported', sourceIds: ['web-1'], ...overrides })
   const history = (claimOverrides: Record<string, unknown> = {}, claimType: 'pricing' | 'feature' = 'pricing', proposition = 'Acme Pro subscription'): HistoricalRetrieval => ({
     messages: [], memoryItems: [], researchSnapshots: [{ id: '8d1e4570-f5e5-4e55-a8f7-65791122a2fb', query: 'Acme pricing', status: 'completed', createdAt: '2025-01-01T00:00:00.000Z', claims: [{ id: 'b879e41c-5110-485f-a9be-7cd85a2b8ad9', snapshotId: '8d1e4570-f5e5-4e55-a8f7-65791122a2fb', entityName: 'Acme', claimType, claimText: claimType === 'pricing' ? '$15 USD monthly' : 'Acme supports offline mode', claimValue: claimType === 'pricing' ? '15' : null, structuredData: { proposition, currency: 'USD', billingPeriod: 'monthly', region: 'US', planOrVersion: 'Pro', priceType: 'standard', discountConditions: null, ...claimOverrides }, verificationStatus: 'supported', provenance: 'previously_generated_claim', validAt: null, recordedAt: '2025-01-01T00:00:00.000Z', sources: [] }] }],

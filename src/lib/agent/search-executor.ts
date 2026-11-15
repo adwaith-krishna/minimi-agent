@@ -39,17 +39,12 @@ export async function executeSearchPlan(
   const queries = plan.shouldSearchWeb ? plan.currentQuestions.filter((query) => query.trim().length > 0) : []
   const maxCalls = Math.min(8, Math.max(0, Number.isFinite(limits.maxCalls) ? Math.floor(limits.maxCalls) : 8), plan.maxCalls, queries.length)
   const maxResults = Math.min(5, Math.max(1, Number.isFinite(limits.maxResultsPerCall) ? Math.floor(limits.maxResultsPerCall) : 5))
-  const outcomes: SearchExecution['outcomes'] = []
-  const results: WebSearchResult[] = []
-  let attemptedCalls = 0
-  let completedCalls = 0
-
-  for (const query of queries.slice(0, maxCalls)) {
+  const plannedQueries = queries.slice(0, maxCalls)
+  const runSearch = async (query: string, index: number) => {
     const remainingMs = totalBudgetMs - Math.floor(now() - startedAt)
-    if (remainingMs <= 0) break
+    if (remainingMs <= 0) return { index, query, result: null, outcome: { query, status: 'failed' as const, resultCount: 0, failure: { kind: 'timeout' as const, retryAfterSeconds: null } } }
     const timeoutMs = Math.max(1, Math.min(perCallBudgetMs, remainingMs))
     const controller = new AbortController()
-    attemptedCalls += 1
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       const timeout = new Promise<never>((_, reject) => {
@@ -61,15 +56,24 @@ export async function executeSearchPlan(
       const raw = await Promise.race([provider.search(query, { maxResults, signal: controller.signal }), timeout])
       const validated = WebSearchResultSchema.parse(raw)
       const bounded = WebSearchResultSchema.parse({ ...validated, query, results: validated.results.slice(0, maxResults) })
-      results.push(bounded)
-      outcomes.push({ query, status: 'succeeded', resultCount: bounded.results.length, failure: null })
+      return { index, query, result: bounded, outcome: { query, status: 'succeeded' as const, resultCount: bounded.results.length, failure: null } }
     } catch (error) {
-      outcomes.push({ query, status: 'failed', resultCount: 0, failure: safeFailure(error) })
+      return { index, query, result: null, outcome: { query, status: 'failed' as const, resultCount: 0, failure: safeFailure(error) } }
     } finally {
       if (timer) clearTimeout(timer)
-      completedCalls += 1
     }
   }
+  const executions: Array<Awaited<ReturnType<typeof runSearch>>> = []
+  const parallelism = Math.min(3, Math.max(1, Math.floor(totalBudgetMs / perCallBudgetMs)))
+  for (let offset = 0; offset < plannedQueries.length; offset += parallelism) {
+    const batch = plannedQueries.slice(offset, offset + parallelism)
+    executions.push(...await Promise.all(batch.map((query, index) => runSearch(query, offset + index))))
+    if (totalBudgetMs - Math.floor(now() - startedAt) <= 0) break
+  }
+  const outcomes = executions.sort((a, b) => a.index - b.index).map(({ outcome }) => outcome)
+  const results = executions.flatMap(({ result }) => result ? [result] : [])
+  const attemptedCalls = executions.length
+  const completedCalls = outcomes.length
 
   const budgetExhausted = outcomes.length < queries.length && (attemptedCalls >= maxCalls || totalBudgetMs - Math.floor(now() - startedAt) <= 0)
   const execution = SearchExecutionSchema.parse({ attemptedCalls, completedCalls, totalDurationMs: Math.max(0, Math.floor(now() - startedAt)), budgetExhausted, outcomes })

@@ -41,7 +41,10 @@ const STOP_WORDS = new Set(['a', 'about', 'an', 'and', 'are', 'as', 'at', 'be', 
 // earlier message was recorded. Filtering messages by the requested date
 // would therefore hide the very statement needed to answer the question.
 function isPersonalMemoryRecall(query: string): boolean {
-  return /\b(planned|plan|scheduled|schedule|meeting|appointment|calendar|remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i.test(query)
+  const personalCue = /\b(?:my|i|we|our|me|remember|saved|upcoming)\b/i.test(query)
+  const memoryTopic = /\b(?:plan|planned|scheduled|schedule|meetings?|appointments?|calendar|events?)\b/i.test(query)
+  return /\b(?:remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i.test(query)
+    || (personalCue && memoryTopic)
     || /\bwhat(?:'s| is| are)\s+(?:on|planned|scheduled|my upcoming)\b/i.test(query)
     || /\bwhen is my\b/i.test(query)
 }
@@ -155,7 +158,10 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
         ? (messages.data ?? []).sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id)).slice(0, 50)
         : rankHistoricalRows(messages.data ?? [], searchText, (item) => item.content, 12)
       ).map((item) => ({ id: item.id, conversationId: item.conversation_id, role: item.role, content: item.content, createdAt: item.created_at })),
-      memoryItems: rankHistoricalRows(memories.data ?? [], searchText, (item) => `${item.entity_name} ${item.content}`, 12).map((item) => ({ id: item.id, entityName: item.entity_name, content: item.content, validFrom: item.valid_from, validTo: item.valid_to, createdAt: item.created_at })),
+      memoryItems: (personalMemoryRecall
+        ? [...(memories.data ?? [])].sort((a, b) => (a.valid_from ?? '9999-12-31').localeCompare(b.valid_from ?? '9999-12-31') || b.created_at.localeCompare(a.created_at)).slice(0, 50)
+        : rankHistoricalRows(memories.data ?? [], searchText, (item) => `${item.entity_name} ${item.content}`, 12)
+      ).map((item) => ({ id: item.id, entityName: item.entity_name, content: item.content, validFrom: item.valid_from, validTo: item.valid_to, createdAt: item.created_at })),
       researchSnapshots: rankHistoricalRows(snapshots.data ?? [], searchText, (item) => item.query, 8).map((item) => ({ id: item.id, query: item.query, status: item.status, createdAt: item.created_at, claims: claims.filter((claim) => claim.snapshot_id === item.id).map((claim) => {
         const structuredData = claim.structured_data ?? {}
         return { id: claim.id, snapshotId: claim.snapshot_id, entityName: claim.entity_name, claimType: claim.claim_type, claimText: claim.claim_text, claimValue: claim.claim_value, structuredData, verificationStatus: historicalClaimVerification(structuredData.verification), provenance: 'previously_generated_claim' as const, validAt: claim.valid_at, recordedAt: claim.recorded_at, sources: sources.filter((source) => source.claim_id === claim.id).map((source) => ({ id: source.id, url: source.url, title: source.title, snippet: source.snippet, domain: source.domain, score: source.score, publishedAt: restoredPublicationDate(item.search_params, source.url, source.published_at), retrievedAt: source.retrieved_at })) }

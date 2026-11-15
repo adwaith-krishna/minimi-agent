@@ -1,5 +1,5 @@
 import { AgentExecutionSchema, ExecutionContextSchema, type AgentExecution, type AgentQuery, type ExecutionContext, type HistoricalRetrieval } from './contracts'
-import { classifyIntent, type IntentClassifier } from './intent'
+import { classifyIntent, classifyIntentDeterministically, type IntentClassifier } from './intent'
 import { createTemporalRetrievalFilter, resolveTemporalReferences } from './temporal'
 import { createSearchPlan } from './search-plan'
 import type { HistoricalRepository } from './retrieval'
@@ -10,6 +10,8 @@ import { buildDeterministicWebAnswer, buildHistoricalEvidence, buildWebEvidence 
 import { compareHistoricalAndCurrent } from './comparison'
 import type { ResearchPersistenceRepository } from './persistence'
 import { buildDeterministicMemoryAcknowledgement, buildDeterministicMemoryAnswer } from './memory'
+import { buildEntityAwareSearchQueries } from './query-planner'
+import { composeDeterministicComparisonAnswer } from './comparison'
 
 export interface AgentDependencies {
   classifier?: IntentClassifier
@@ -35,13 +37,24 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     if (temporal.references.some((item) => item.kind === 'ambiguous' || item.kind === 'unspecified')) {
       return AgentExecutionSchema.parse({ status: 'needs_clarification', intent: null, temporal, history: null, searchPlan: null, answer: null, error: null })
     }
+    const explicitMemory = buildDeterministicMemoryAcknowledgement(query.query)
+    if (explicitMemory) {
+      const intent = classifyIntentDeterministically(query.query)
+      const searchLimits = dependencies.searchLimits ?? getSearchExecutionLimits()
+      const searchPlan = (dependencies.planSearch ?? createSearchPlan)({ intent: intent.intent, query: query.query, hasHistoricalContext: false, maxCalls: Math.min(dependencies.maxSearchCalls ?? searchLimits.maxCalls, searchLimits.maxCalls) })
+      const emptyHistory: HistoricalRetrieval = { messages: [], memoryItems: [], researchSnapshots: [] }
+      return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history: emptyHistory, searchPlan, evidenceSources: [], answer: explicitMemory, error: null })
+    }
     const intent = await classifyIntent(query.query, dependencies.classifier)
     const temporalFilter = createTemporalRetrievalFilter(temporal, intent.intent, query.query) ?? undefined
     const temporalTerms = temporal.references.filter((item) => item.start !== null && item.end !== null).map((item) => item.text)
     const history: HistoricalRetrieval = await dependencies.repository.retrieve({ userId: context.userId, query: query.query, conversationId: query.conversationId, temporalFilter, temporalTerms })
+    const answerHistory: HistoricalRetrieval = intent.intent === 'general_conversational'
+      ? { messages: [], memoryItems: [], researchSnapshots: [] }
+      : history
     const hasHistoricalContext = history.messages.length + history.memoryItems.length + history.researchSnapshots.length > 0
     const searchLimits = dependencies.searchLimits ?? getSearchExecutionLimits()
-    const searchPlan = (dependencies.planSearch ?? createSearchPlan)({ intent: intent.intent, query: query.query, hasHistoricalContext, maxCalls: Math.min(dependencies.maxSearchCalls ?? searchLimits.maxCalls, searchLimits.maxCalls) })
+    const searchPlan = (dependencies.planSearch ?? createSearchPlan)({ intent: intent.intent, query: query.query, hasHistoricalContext, maxCalls: Math.min(dependencies.maxSearchCalls ?? searchLimits.maxCalls, searchLimits.maxCalls), searchQueries: buildEntityAwareSearchQueries(query.query, history) })
 
     // A conversational or memory-only question only needs the reasoning provider.
     // Requiring web search and snapshot persistence here made ordinary questions
@@ -50,9 +63,9 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
       // A new explicit note is an action, not a recall question. Acknowledge it
       // before looking at older memory so a fresh meeting/date cannot be
       // answered with a stale saved item.
-      const memoryAnswer = buildDeterministicMemoryAcknowledgement(query.query) ?? buildDeterministicMemoryAnswer(query.query, history)
+      const memoryAnswer = buildDeterministicMemoryAcknowledgement(query.query) ?? buildDeterministicMemoryAnswer(query.query, answerHistory)
       if (memoryAnswer) {
-        const evidenceSources = buildHistoricalEvidence(history)
+        const evidenceSources = buildHistoricalEvidence(answerHistory)
         return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer: memoryAnswer, error: null })
       }
       return AgentExecutionSchema.parse({ status: 'failed', intent, temporal, history, searchPlan, answer: null, error: errorValue('PROVIDER_ERROR', 'Research providers are not configured for this request.') })
@@ -63,10 +76,10 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
     }
 
     if (!searchPlan.shouldSearchWeb) {
-      const evidenceSources = buildHistoricalEvidence(history)
+      const evidenceSources = buildHistoricalEvidence(answerHistory)
       const answer = buildDeterministicMemoryAcknowledgement(query.query)
-        ?? buildDeterministicMemoryAnswer(query.query, history)
-        ?? await dependencies.reasoner!.generateAnswer({ query: query.query, history, sources: evidenceSources, claims: [], comparisons: [] })
+        ?? buildDeterministicMemoryAnswer(query.query, answerHistory)
+        ?? await dependencies.reasoner!.generateAnswer({ query: query.query, history: answerHistory, sources: evidenceSources, claims: [], comparisons: [] })
       return AgentExecutionSchema.parse({ status: 'no_search', intent, temporal, history, searchPlan, evidenceSources, answer, error: null })
     }
 
@@ -106,9 +119,18 @@ export async function executeAgent(query: AgentQuery, executionContext: Executio
       return AgentExecutionSchema.parse({ status: 'partial', ...base, evidenceSources, extractedClaims: [], comparisons: [], snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: deterministicWebAnswer, error: persistenceFailed ? errorValue('PERSISTENCE_ERROR', 'Search evidence was found but could not be saved.', { cleanupAttempted: persistenceCleanupAttempted, cleanupSucceeded: persistenceCleanupSucceeded }) : null })
     }
     const comparisons = intent.intent === 'historical_current_comparison' ? compareHistoricalAndCurrent(history, extractedClaims) : []
+    const deterministicComparison = intent.intent === 'historical_current_comparison'
+      ? composeDeterministicComparisonAnswer(comparisons, evidenceSources)
+      : null
+    if (deterministicComparison) {
+      const persisted = await persist(extractedClaims, comparisons, evidenceSources, failures > 0 ? 'partial' : 'completed')
+      const state = persistenceFailed || failures > 0 ? 'partial' : 'completed'
+      return AgentExecutionSchema.parse({ status: state, ...base, evidenceSources, extractedClaims, comparisons, snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: deterministicComparison,
+        error: persistenceFailed ? errorValue('PERSISTENCE_ERROR', 'Research results were generated but could not be saved.', { cleanupAttempted: persistenceCleanupAttempted, cleanupSucceeded: persistenceCleanupSucceeded }) : failures > 0 ? errorValue('PROVIDER_ERROR', 'Some planned web searches failed; this answer may be incomplete.') : null })
+    }
     let answer: Awaited<ReturnType<ResearchReasoner['generateAnswer']>>
     try {
-      answer = await dependencies.reasoner.generateAnswer({ query: query.query, history, sources: evidenceSources, claims: extractedClaims, comparisons })
+      answer = await dependencies.reasoner.generateAnswer({ query: query.query, history: answerHistory, sources: evidenceSources, claims: extractedClaims, comparisons })
     } catch {
       const persisted = await persist(extractedClaims, comparisons, evidenceSources, 'partial')
       return AgentExecutionSchema.parse({ status: 'partial', ...base, evidenceSources, extractedClaims, comparisons, snapshotId: persisted?.snapshotId ?? null, conversationId: persisted?.conversationId ?? null, answer: deterministicWebAnswer, error: persistenceFailed ? errorValue('PERSISTENCE_ERROR', 'Research findings were generated but could not be saved.', { cleanupAttempted: persistenceCleanupAttempted, cleanupSucceeded: persistenceCleanupSucceeded }) : null })

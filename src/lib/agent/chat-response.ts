@@ -25,6 +25,23 @@ export function citationLabel(citation: ChatCitation): string {
   }
 }
 
+const internalHistoryReference = /\[(?:history-(?:message|memory|source|claim)):[^\]\n]+\]/gi
+
+/** Keep stored provenance intact while removing internal references from dialogue. */
+export function formatAssistantText(text: string): string {
+  const paragraphs = text
+    .replace(internalHistoryReference, '')
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/[ \t]+/g, ' ').replace(/\s+([,.;!?])/g, '$1').trim().replace(/^(?:insufficient evidence:\s*){2,}/i, 'Insufficient evidence: '))
+    .filter(Boolean)
+
+  const uniqueParagraphs: string[] = []
+  for (const paragraph of paragraphs) {
+    if (uniqueParagraphs.at(-1)?.toLocaleLowerCase() !== paragraph.toLocaleLowerCase()) uniqueParagraphs.push(paragraph)
+  }
+  return uniqueParagraphs.join('\n\n')
+}
+
 export function assistantText(result: AgentExecution): string {
-  return result.answer?.text || result.error?.message || 'I could not produce a source-backed answer.'
+  return formatAssistantText(result.answer?.text || result.error?.message || 'I could not produce a source-backed answer.')
 }

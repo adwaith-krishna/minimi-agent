@@ -48,8 +48,43 @@ function dateKeys(value: string): Set<string> {
   return keys
 }
 
+const memoryRecallPattern = /\b(?:remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i
+
+export function isPersonalMemoryRecall(query: string): boolean {
+  const personalCue = /\b(?:my|i|we|our|me|remember|saved|upcoming)\b/i.test(query)
+  const memoryTopic = /\b(?:plan|planned|scheduled|schedule|meeting|appointment|calendar|events?)\b/i.test(query)
+  return memoryRecallPattern.test(query) || (personalCue && memoryTopic)
+    || /\bwhat(?:'s| is| are)\s+(?:on|planned|scheduled|my upcoming)\b/i.test(query)
+}
+
+function displayDateLabel(value: string): string {
+  return value.replace(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|sept(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/gi, (month) => {
+    const full = monthAliases[month.toLowerCase()] ?? month.toLowerCase()
+    return full.charAt(0).toUpperCase() + full.slice(1)
+  })
+}
+
+function displayMemoryFact(value: string): string {
+  let fact = value.trim()
+    .replace(/^The user noted a personal schedule:\s*/i, '')
+    .replace(/^The user's planned and scheduled calendar note is:\s*/i, '')
+    .replace(/\s+Event dates?:.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  fact = displayDateLabel(fact)
+    .replace(/\bI have\b/gi, 'you have')
+    .replace(/\bI am\b/gi, 'you are')
+    .replace(/\bI'm\b/gi, "you're")
+    .replace(/\bmy\b/gi, 'your')
+    .replace(/\bI\b/g, 'you')
+    .replace(/^(\w)/, (character) => character.toUpperCase())
+    .replace(/^(On\s+\w+\s+\d+(?:st|nd|rd|th)?)(\s+)(you|your)\b/i, '$1, $3')
+    .replace(/^(\w+\s+\d+(?:st|nd|rd|th)?)(\s+)(you|your)\b/i, '$1, $3')
+  return /[.!?]$/.test(fact) ? fact : `${fact}.`
+}
+
 function eventEntityName(value: string): string {
-  const match = value.match(/\b(exam|test|meeting|appointment|call|interview|class|lesson|deadline|birthday|date|trip|flight|presentation)\b/i)
+  const match = value.match(/\b(exams?|tests?|meetings?|appointments?|calls?|interviews?|classes|lessons?|deadlines?|birthdays?|dates?|trips?|flights?|presentations?)\b/i)
   return match?.[1]?.toLowerCase() ?? 'personal schedule'
 }
 
@@ -81,33 +116,52 @@ export function extractExplicitMemories(query: string, options: { referenceYear?
   // “remember that”. Keep the original wording so a later question can match
   // names, dates, times, and the event relationship without guessing.
   const hasDate = /\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\b\d{4}-\d{2}-\d{2}\b/i.test(value)
-  const hasEvent = /\b(meeting|meet|appointment|call|interview|exam|test|class|lesson|予定|scheduled|schedule|agenda|founder|deadline|plan|planned|birthday|trip|flight|presentation)\b/i.test(value)
+  const hasEvent = /\b(meetings?|meet|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|予定|scheduled|schedule|agenda|founder|deadlines?|plans?|planned|birthdays?|trips?|flights?|presentations?)\b/i.test(value)
   if (hasDate && hasEvent && !isQuestion(value)) {
     const dates = eventDateLabels(value)
-    const validFrom = firstEventDate(value, options.referenceYear)
-    return [{ entityType: 'fact', entityName: eventEntityName(value), content: `The user noted a personal schedule: ${clean(value)}${dates.length ? ` Event date${dates.length === 1 ? '' : 's'}: ${dates.join(', ')}.` : '.'}`, ...(validFrom ? { validFrom } : {}) }]
+    if (dates.length <= 1) {
+      const validFrom = firstEventDate(value, options.referenceYear)
+      return [{ entityType: 'fact', entityName: eventEntityName(value), content: `The user noted a personal schedule: ${clean(value)}${dates.length ? ` Event date: ${dates[0]}.` : '.'}`, ...(validFrom ? { validFrom } : {}) }]
+    }
+    return dates.map((date, index) => {
+      const start = value.toLowerCase().indexOf(date.toLowerCase())
+      const next = index + 1 < dates.length ? value.toLowerCase().indexOf(dates[index + 1].toLowerCase(), start + date.length) : value.length
+      const detail = clean(value.slice(start, next).replace(/^(?:and|then|[,;:])\s*/i, '').replace(/\s+(?:is\s+on|is|on|at|for)\s*$/i, ''))
+      const validFrom = firstEventDate(date, options.referenceYear)
+      return { entityType: 'fact', entityName: eventEntityName(detail), content: `The user noted a personal schedule: ${detail} Event date: ${date}.`, ...(validFrom ? { validFrom } : {}) }
+    })
   }
   return []
 }
 
 export function buildDeterministicMemoryAnswer(query: string, history: HistoricalRetrieval): FinalAnswer | null {
+  if (!isPersonalMemoryRecall(query)) return null
   const savedUserMessages = history.messages.filter((message) => message.role === 'user'
     && !isQuestion(message.content)
-    && /\b(meeting|appointment|call|interview|exam|test|class|lesson|schedule|scheduled|founder|deadline|plan|planned|date|birthday|trip|flight|presentation)\b/i.test(message.content))
-  const savedMemories = history.memoryItems.filter((memory) => /\b(schedule|scheduled|meeting|appointment|call|interview|exam|test|class|lesson|founder|deadline|plan|planned|date|birthday|trip|flight|presentation)\b/i.test(`${memory.entityName} ${memory.content}`))
-  if (!savedMemories.length && !savedUserMessages.length) return null
-  const isRecall = /\b(what|when|where|who|which|tell|planned|plan|scheduled|schedule|meeting|remember|recall|note|said|asked|upcoming|events?)\b/i.test(query)
-  if (!isRecall) return null
+    && /\b(meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|schedule|scheduled|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?)\b/i.test(message.content))
+  const savedMemories = history.memoryItems.filter((memory) => /\b(schedule|scheduled|meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?)\b/i.test(`${memory.entityName} ${memory.content}`))
   const requestedDates = dateKeys(query)
+  if (!savedMemories.length && !savedUserMessages.length) {
+    const requestedLabel = eventDateLabels(query)[0]
+    return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : 'I don’t have any matching plans saved.', citations: [], claims: [] }
+  }
   const candidates = [
     ...savedMemories.map((memory) => ({ content: memory.content, createdAt: memory.createdAt })),
     ...savedUserMessages.map((message) => ({ content: message.content, createdAt: message.createdAt })),
-  ].filter((candidate, index, all) => all.findIndex((item) => item.content.toLowerCase() === candidate.content.toLowerCase()) === index)
+  ].filter((candidate, index, all) => {
+    const canonical = displayMemoryFact(candidate.content).toLowerCase().replace(/(\d)(?:st|nd|rd|th)\b/g, '$1')
+    return all.findIndex((item) => displayMemoryFact(item.content).toLowerCase().replace(/(\d)(?:st|nd|rd|th)\b/g, '$1') === canonical) === index
+  })
     .filter((candidate) => !requestedDates.size || [...requestedDates].some((date) => dateKeys(candidate.content).has(date)))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 8)
-  if (!candidates.length) return null
-  const content = candidates.map(({ content }) => `• ${content}`).join('\n\n')
+  if (!candidates.length) {
+    const requestedLabel = eventDateLabels(query)[0]
+    return { text: requestedLabel ? `I don’t have anything recorded for ${displayDateLabel(requestedLabel)}.` : 'I don’t have any matching plans saved.', citations: [], claims: [] }
+  }
+  const rendered = candidates.map(({ content }) => displayMemoryFact(content))
+    .filter((content, index, all) => all.findIndex((item) => item.toLocaleLowerCase() === content.toLocaleLowerCase()) === index)
+  const content = rendered.map((item) => `• ${item}`).join('\n\n')
   return {
     text: `Here’s what I found in your saved information:\n\n${content}`,
     citations: [],

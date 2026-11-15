@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assistantText, citationLabel, parseChatResponse, safeCitationUrl } from '@/lib/agent/chat-response'
+import { assistantText, citationLabel, formatAssistantText, parseChatResponse, safeCitationUrl } from '@/lib/agent/chat-response'
 
 const base = {
   intent: null, temporal: null, history: null, searchPlan: null, searchExecution: null,
@@ -8,6 +8,18 @@ const base = {
 }
 
 describe('chat response boundary', () => {
+  it('hides internal history identifiers without hiding web citations', () => {
+    expect(formatAssistantText('You mentioned this before. [history-message:abc] See [web-1].')).toBe('You mentioned this before. See [web-1].')
+  })
+
+  it('keeps repeated personal-context paragraphs concise', () => {
+    expect(formatAssistantText('From your saved context, you chose the simpler option.\n\nfrom your saved context, you chose the simpler option.')).toBe('From your saved context, you chose the simpler option.')
+  })
+
+  it('normalizes conversational spacing and punctuation', () => {
+    expect(formatAssistantText('You said   this  ,  and I found it.')).toBe('You said this, and I found it.')
+  })
+
   it('keeps citations and follow-up identifiers for a completed synthetic fixture', () => {
     // Synthetic fixture: no historical user record is implied by this test data.
     const result = parseChatResponse({ ...base, status: 'completed', answer: { text: 'Supported answer.', claims: [], citations: [{ id: 'source-1', title: 'Example source', url: 'https://example.com/article' }] } })

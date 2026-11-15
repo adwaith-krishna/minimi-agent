@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { assistantText, citationLabel, parseChatResponse, safeCitationUrl, type ChatMessage } from '@/lib/agent/chat-response'
+import { assistantText, citationLabel, formatAssistantText, parseChatResponse, safeCitationUrl, type ChatMessage } from '@/lib/agent/chat-response'
 import type { AgentExecution } from '@/lib/agent/contracts'
 import { createClient } from '@/lib/supabase/client'
 
@@ -81,7 +81,7 @@ export default function ChatClient({ email }: { email: string | null }) {
     if (!response.ok) return
     const payload = await response.json() as { conversation?: { id: string }; messages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> }
     setConversationId(payload.conversation?.id ?? id)
-    setMessages((payload.messages ?? []).filter((message) => message.role === 'user' || message.role === 'assistant').map((message) => ({ role: message.role as 'user' | 'assistant', text: message.content })))
+    setMessages((payload.messages ?? []).filter((message) => message.role === 'user' || message.role === 'assistant').map((message) => ({ role: message.role as 'user' | 'assistant', text: message.role === 'assistant' ? formatAssistantText(message.content) : message.content })))
     setSidebarOpen(false)
   }
 

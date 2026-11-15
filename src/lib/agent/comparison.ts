@@ -1,4 +1,4 @@
-import { ClaimComparisonResultSchema, type ClaimComparisonResult, type ExtractedResearchClaim, type HistoricalRetrieval } from './contracts'
+import { ClaimComparisonResultSchema, FinalAnswerSchema, type ClaimComparisonResult, type EvidenceSource, type ExtractedResearchClaim, type HistoricalRetrieval, type FinalAnswer } from './contracts'
 import { historicalClaimSources } from './evidence'
 
 type HistoricalFact = {
@@ -22,7 +22,11 @@ function historicalFacts(history: HistoricalRetrieval): HistoricalFact[] {
     }
   }))
   const memories = history.memoryItems.map((item) => ({ entityName: item.entityName, claimType: 'general' as const, proposition: null, claimText: item.content, claimValue: null, currency: null, billingPeriod: null, region: null, planOrVersion: null, priceType: 'unknown' as const, discountConditions: null, verificationStatus: 'unknown' as const, sourceIds: [`history-memory:${item.id}`] }))
-  return [...research, ...memories]
+  const messages = history.messages.filter((message) => message.role !== 'system').flatMap((message) => {
+    const entities = message.content.match(/\b(?:Postgres(?:ql)?|Salesforce|HubSpot|Pipedrive|SugarCRM|Zoho|CRM|Supabase|AWS|Azure|GCP)\b/gi) ?? ['historical conversation']
+    return [...new Set(entities.map((entity) => entity.toLowerCase()))].map((entity) => ({ entityName: entity, claimType: /pricing|price|cost/i.test(message.content) ? 'pricing' as const : 'general' as const, proposition: null, claimText: message.content, claimValue: null, currency: null, billingPeriod: null, region: null, planOrVersion: null, priceType: 'unknown' as const, discountConditions: null, verificationStatus: 'supported' as const, sourceIds: [`history-message:${message.id}`] }))
+  })
+  return [...research, ...memories, ...messages]
 }
 
 function result(historicalClaim: string | null, currentClaim: string | null, outcome: ClaimComparisonResult['outcome'], explanation: string, sourceIds: string[]): ClaimComparisonResult {
@@ -154,4 +158,34 @@ export function compareHistoricalAndCurrent(history: HistoricalRetrieval, curren
     }
   }
   return results.length ? results : [result(null, null, 'insufficient_evidence', 'The retrieved evidence did not support a comparison.', [])]
+}
+
+export function composeDeterministicComparisonAnswer(comparisons: ClaimComparisonResult[], sources: EvidenceSource[]): FinalAnswer | null {
+  if (!comparisons.length) return null
+  const sourceById = new Map(sources.map((source) => [source.id, source]))
+  const citations = new Map<string, { id: string; title: string; url: string }>()
+  const noHistoricalBaseline = comparisons.every((comparison) => !comparison.historicalClaim && comparison.outcome === 'insufficient_evidence')
+  if (noHistoricalBaseline) {
+    const currentFacts = [...new Set(comparisons.map((comparison) => comparison.currentClaim).filter((claim): claim is string => Boolean(claim)))]
+    const refs = [...new Set(comparisons.flatMap((comparison) => comparison.sourceIds))]
+    for (const id of refs) {
+      const source = sourceById.get(id)
+      if (source?.url) citations.set(id, { id, title: source.title ?? source.domain ?? 'Source', url: source.url })
+    }
+    const facts = currentFacts.slice(0, 12).map((fact) => `• ${fact}`).join('\n\n')
+    const citationRefs = refs.map((id) => `[${id}]`).join(' ')
+    return FinalAnswerSchema.parse({ text: `I found current information, but I could not confirm what changed because the earlier conversation did not contain a comparable baseline.\n\n${facts}${citationRefs ? `\n\nSources: ${citationRefs}` : ''}`, citations: [...citations.values()], claims: [] })
+  }
+  const lines = comparisons.slice(0, 20).map((comparison) => {
+    const refs = [...new Set(comparison.sourceIds)].map((id) => `[${id}]`).join(' ')
+    for (const id of comparison.sourceIds) {
+      const source = sourceById.get(id)
+      if (source?.url) citations.set(id, { id, title: source.title ?? source.domain ?? 'Source', url: source.url })
+    }
+    const current = comparison.currentClaim ? ` Current evidence: ${comparison.currentClaim}` : ''
+    const previous = comparison.historicalClaim ? ` Earlier context: ${comparison.historicalClaim}` : ''
+    const label = comparison.outcome.replaceAll('_', ' ')
+    return `• ${label.charAt(0).toUpperCase()}${label.slice(1)}. ${comparison.explanation}${previous}${current}${refs ? ` ${refs}` : ''}`
+  })
+  return FinalAnswerSchema.parse({ text: `Here’s the comparison I could verify:\n\n${lines.join('\n\n')}`, citations: [...citations.values()], claims: [] })
 }
