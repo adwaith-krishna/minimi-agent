@@ -29,11 +29,19 @@ export function buildWebEvidence(results: WebSearchResult[], observedAt: string)
  * of throwing away useful evidence.
  */
 export function buildDeterministicWebAnswer(sources: EvidenceSource[]): FinalAnswer | null {
-  const webSources = sources.filter((source) => source.kind === 'web' && source.url).slice(0, 8)
+  const webSources = sources.filter((source) => source.kind === 'web' && source.url)
+    .filter((source, index, all) => all.findIndex((candidate) => candidate.url === source.url) === index)
+    .slice(0, 6)
   if (!webSources.length) return null
-  const text = webSources.map((source) => `${source.title ?? source.domain ?? 'Source'}: ${source.snippet.trim().slice(0, 700)} [${source.id}]`).join('\n\n')
+  const text = webSources.map((source) => {
+    const snippet = source.snippet.trim()
+      .replace(/^(?:insufficient evidence|current evidence|new information)\s*:\s*/i, '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 420)
+    return `• ${source.title ?? source.domain ?? 'Source'} — ${snippet} [${source.id}]`
+  }).join('\n')
   return {
-    text: `Here is the current evidence I found:\n\n${text}`,
+    text: `Here’s the clearest current evidence I found:\n\n${text}\n\nThese are source-backed findings, not a definitive ranking or recommendation.`,
     citations: webSources.map((source) => ({ id: source.id, title: source.title ?? source.domain ?? 'Source', url: source.url! })),
     claims: [],
   }

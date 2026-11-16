@@ -38,13 +38,30 @@ describe('explicit personal memory extraction', () => {
     }])
   })
 
+  it('captures reviews and assignment submissions as dated events', () => {
+    expect(extractExplicitMemories('On November 28, I have a portfolio review', { referenceYear: 2026 })[0]?.entityName).toBe('review')
+    expect(extractExplicitMemories('On December 15, I need to submit my design assignment', { referenceYear: 2026 })[0]?.entityName).toBe('assignment')
+  })
+
+  it('captures a research shortlist as a durable baseline note', () => {
+    expect(extractExplicitMemories('On Monday, I shortlisted Notion, Asana, Linear, Trello, and ClickUp for a design team.')[0]).toMatchObject({ entityName: 'research shortlist' })
+  })
+
+  it('captures project context and intentions without changing their meaning', () => {
+    expect(extractExplicitMemories('I am building a SaaS product called TaskPilot.')[0]).toMatchObject({ entityType: 'product', content: 'The user is building a SaaS product called TaskPilot.' })
+    expect(extractExplicitMemories('I plan to use PostgreSQL and TypeScript for TaskPilot.')[0]).toMatchObject({ entityType: 'decision', content: 'The user plans to use PostgreSQL and TypeScript for TaskPilot.' })
+    expect(extractExplicitMemories('1. I am comparing hosting options for a Node.js application.')[0]).toMatchObject({ entityType: 'topic', content: 'The user is comparing hosting options for a Node.js application.' })
+  })
+
   it('captures common date typos and a plain date event', () => {
     expect(extractExplicitMemories('on december 1 i have date', { referenceYear: 2026 })[0]?.validFrom).toBe('2026-12-01T00:00:00.000Z')
     expect(extractExplicitMemories('on januvary 22 i have another exams', { referenceYear: 2026 })[0]?.validFrom).toBe('2026-01-22T00:00:00.000Z')
   })
 
   it('extracts each line from a multiline personal-context paste', () => {
-    expect(extractExplicitMemories('My name is Uday and I prefer concise answers.\n\nI live in Bengaluru and I work on AI products.\n\nOn November 23, I have exams.')).toHaveLength(5)
+    const memories = extractExplicitMemories('My name is Uday and I prefer concise answers.\n\nI live in Bengaluru and I work as a product designer.\n\nOn November 23, I have exams.')
+    expect(memories).toHaveLength(5)
+    expect(memories.some((memory) => memory.content === 'The user works as a product designer.')).toBe(true)
   })
 
   it('maps month-only schedule questions to events in that month', () => {

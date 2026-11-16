@@ -6,8 +6,8 @@ type CalendarDate = { year: number; month: number; day: number }
 type TemporalReference = TemporalResolution['references'][number]
 
 const weekdays: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 }
-const months: Record<string, number> = { january: 1, jan: 1, february: 2, feb: 2, march: 3, mar: 3, april: 4, apr: 4, may: 5, june: 6, jun: 6, july: 7, jul: 7, august: 8, aug: 8, september: 9, sep: 9, sept: 9, october: 10, oct: 10, november: 11, nov: 11, december: 12, dec: 12 }
-const monthPattern = 'September|February|November|December|January|October|August|March|April|June|July|May|Sept|Sep|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Oct|Nov|Dec'
+const months: Record<string, number> = { january: 1, januaryy: 1, januvary: 1, jan: 1, february: 2, febuary: 2, feb: 2, march: 3, mar: 3, april: 4, apr: 4, may: 5, june: 6, jun: 6, july: 7, jul: 7, august: 8, aug: 8, september: 9, sep: 9, sept: 9, october: 10, oct: 10, november: 11, novemeber: 11, nov: 11, december: 12, dec: 12 }
+const monthPattern = 'September|February|November|December|January|Januvary|Novemeber|October|August|March|April|June|July|May|Sept|Sep|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Oct|Nov|Dec'
 const numberWords: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 }
 
 function localDate(timestamp: string, timezone: string): CalendarDate {
@@ -307,10 +307,16 @@ export function resolveTemporalReferences(query: string, options: { timezone?: s
     }
   }
 
-  const monthOnlyCue = new RegExp(`\\b(?:in|during|since|until|throughout|by)\\s+(${monthPattern})\\b`, 'gi')
+  const scheduleQuery = /\b(?:planned|plan|scheduled|schedule|events?|upcoming|calendar|meetings?|appointments?|exams?|deadlines?)\b/i.test(query)
+  const monthOnlyCue = new RegExp(`\\b(?:in|during|since|until|throughout|by|for)\\s+(${monthPattern})\\b`, 'gi')
   for (const match of query.matchAll(monthOnlyCue)) {
     if (!references.some((reference) => reference.text.toLowerCase().includes(match[1].toLowerCase()))) {
-      addReference(references, match[0], 'ambiguous', null, null, `The year or day for ${match[1]} is not specified.`)
+      if (scheduleQuery) {
+        const month = months[match[1].toLowerCase()]
+        let year = currentYear
+        if (month < currentMonth) year += 1
+        addReference(references, match[0], 'date_range', monthStart(year, month), monthEnd(year, month))
+      } else addReference(references, match[0], 'ambiguous', null, null, `The year or day for ${match[1]} is not specified.`)
     }
   }
   const partialMonthCue = new RegExp(`\\b(?:early|mid|late)\\s+(${monthPattern})\\b`, 'gi')

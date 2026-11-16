@@ -5,7 +5,9 @@ import { OpenRouterHttpProvider, TavilyHttpProvider } from '@/lib/agent/provider
 import { readAgentRequestBody, getMaxAgentRequestBytes } from '@/lib/agent/request-body'
 import { SupabaseHistoricalRepository } from '@/lib/agent/retrieval'
 import { SupabaseConversationTurnPersistenceRepository, SupabaseResearchPersistenceRepository } from '@/lib/agent/persistence'
-import { extractExplicitMemories } from '@/lib/agent/memory'
+import { PersonalMemoryService } from '@/lib/agent/memory-service'
+import { modelMemoriesOrFallback } from '@/lib/agent/model-decision'
+import { SupabaseConversationLedger } from '@/lib/agent/conversation-ledger'
 import { getSearchExecutionLimits } from '@/lib/agent/search-executor'
 import { createClient } from '@/lib/supabase/server'
 import { sanitizeTimezone } from '@/lib/utils/timezone'
@@ -51,12 +53,20 @@ export async function POST(request: Request) {
 
     const hasReasoningProvider = Boolean(process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY)
     const hasTavily = Boolean(process.env.TAVILY_API_KEY)
+    const repository = new SupabaseHistoricalRepository(supabase)
+    const memory = new PersonalMemoryService(repository)
+    const turns = new SupabaseConversationTurnPersistenceRepository(supabase)
+    const ledger = new SupabaseConversationLedger(repository, turns)
+    const modelDecision = await memory.analyze(parsed.data.query)
     const result = await executeAgent(parsed.data, {
       userId: user.id,
       timezone,
       referenceTimestamp,
     }, {
-      repository: new SupabaseHistoricalRepository(supabase),
+      repository,
+      memory,
+      ledger,
+      modelDecision,
       classifier: hasReasoningProvider ? { classify: (query) => new OpenRouterHttpProvider().classifyIntent(query) } : undefined,
       reasoner: hasReasoningProvider ? new OpenRouterHttpProvider() : undefined,
       tavily: hasTavily ? new TavilyHttpProvider() : undefined,
@@ -69,12 +79,12 @@ export async function POST(request: Request) {
       : 'Minimi could not complete that request.')
     let responseResult = result
     try {
-      const persistedTurn = await new SupabaseConversationTurnPersistenceRepository(supabase).persistTurn({
+      const persistedTurn = await ledger.persistTurn({
         userId: user.id,
         conversationId: result.conversationId ?? parsed.data.conversationId,
         userContent: parsed.data.query,
         assistantContent,
-        memories: extractExplicitMemories(parsed.data.query, { referenceYear: new Date(referenceTimestamp).getUTCFullYear() }),
+        memories: modelMemoriesOrFallback(modelDecision, memory.extract(parsed.data.query, new Date(referenceTimestamp).getUTCFullYear())),
       })
       responseResult = { ...result, conversationId: result.conversationId ?? persistedTurn.conversationId }
     } catch {
@@ -83,7 +93,9 @@ export async function POST(request: Request) {
         error: result.error ?? { code: 'PERSISTENCE_ERROR', message: 'Minimi answered, but could not save this conversation.' },
       }
     }
-    const responseStatus = responseResult.status === 'failed' ? 503 : 200
+    // A user-facing rejection is a valid completed interaction. Reserve 503
+    // for failures that produced no safe answer at all.
+    const responseStatus = responseResult.status === 'failed' && !responseResult.answer ? 503 : 200
     const response = NextResponse.json(responseResult, { status: responseStatus })
     const totalDurationMs = Math.round(performance.now() - requestStartedAt)
     const searchDurationMs = responseResult.searchExecution?.totalDurationMs ?? 0

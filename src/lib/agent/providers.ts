@@ -23,6 +23,19 @@ const OPERATION_TIMEOUTS: Record<ReasoningOperation, number> = {
   verification: 8_000,
 }
 
+const OPERATION_MAX_TOKENS: Record<ReasoningOperation, number> = {
+  classification: 300,
+  extraction: 3_000,
+  answer: 2_000,
+  verification: 800,
+}
+
+function configuredMaxTokens(operation: ReasoningOperation): number {
+  const value = Number(process.env[`OPENROUTER_${operation.toUpperCase()}_MAX_TOKENS`])
+  const fallback = OPERATION_MAX_TOKENS[operation]
+  return Number.isFinite(value) ? Math.min(4_000, Math.max(128, Math.floor(value))) : fallback
+}
+
 function configuredTimeout(operation: ReasoningOperation, kind: ReasoningProviderConfig['kind']): number {
   const fallback = kind === 'openrouter' ? OPERATION_TIMEOUTS[operation] : 8_000
   const value = Number(process.env[`OPENROUTER_${operation.toUpperCase()}_TIMEOUT_MS`])
@@ -383,7 +396,7 @@ export class GeminiHttpProvider implements GeminiProvider {
   private async generateJsonOnce(config: ReasoningProviderConfig, model: string | null, instruction: string, data: unknown, temperature: number, operation: ReasoningOperation): Promise<unknown> {
     const schema = outputSchema(operation)
     const request: { url: string; headers: Record<string, string>; body: unknown } = config.kind === 'openrouter'
-      ? { url: 'https://openrouter.ai/api/v1/chat/completions', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` }, body: { model, messages: [{ role: 'system', content: instruction }, { role: 'user', content: JSON.stringify(data) }], response_format: { type: 'json_schema', json_schema: { name: `minimi_${operation}`, strict: true, schema } }, provider: { require_parameters: true }, temperature } }
+      ? { url: 'https://openrouter.ai/api/v1/chat/completions', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` }, body: { model, max_tokens: configuredMaxTokens(operation), messages: [{ role: 'system', content: instruction }, { role: 'user', content: JSON.stringify(data) }], response_format: { type: 'json_schema', json_schema: { name: `minimi_${operation}`, strict: true, schema } }, provider: { require_parameters: true }, temperature } }
       : { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', headers: { 'content-type': 'application/json', 'x-goog-api-key': config.key }, body: { systemInstruction: { parts: [{ text: instruction }] }, contents: [{ parts: [{ text: JSON.stringify(data) }] }], generationConfig: { responseMimeType: 'application/json', responseJsonSchema: schema, temperature } } }
     const response = await fetch(request.url, { method: 'POST', signal: AbortSignal.timeout(configuredTimeout(operation, config.kind)), headers: request.headers, body: JSON.stringify(request.body) })
     if (!response.ok) throw providerHttpError(response.status, response.headers.get('retry-after'))

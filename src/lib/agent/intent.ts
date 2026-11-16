@@ -1,5 +1,4 @@
 import { IntentResultSchema, type Intent, type IntentResult } from './contracts'
-import { ProviderRequestError } from './provider-errors'
 
 export interface IntentClassifier { classify(query: string): Promise<IntentResult> }
 
@@ -32,10 +31,11 @@ export async function classifyIntent(query: string, classifier?: IntentClassifie
     if (deterministic.intent !== 'general_conversational' && providerResult.intent === 'general_conversational') return deterministic
     if (deterministic.intent === 'historical_current_comparison' && providerResult.intent !== deterministic.intent) return deterministic
     return providerResult
-  } catch (error) {
+  } catch {
     // Intent classification is an optimization. A transient classifier failure
     // must not prevent deterministic web-search routes from running.
-    if (error instanceof ProviderRequestError && error.kind === 'rate_limited') throw error
+    // Routing is an optimization. A provider outage, including rate limits,
+    // must never turn a normal conversation into an HTTP 503.
     return deterministic
   }
 }

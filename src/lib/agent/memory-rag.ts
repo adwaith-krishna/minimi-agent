@@ -20,7 +20,7 @@ const MEMORY_PROMPT = [
 const ROUTE_PROMPT = 'Classify the user query as personal when it asks about saved user facts, plans, preferences, or prior user-provided context; web when it asks for current, external, or source-backed information; otherwise conversation. Return only JSON with a route field.'
 
 function configuredModel(): string | null {
-  const value = process.env.OPENROUTER_MEMORY_MODEL || process.env.OPENROUTER_MODEL
+  const value = process.env.OPENROUTER_ROUTER_MODEL || process.env.OPENROUTER_MEMORY_MODEL || process.env.OPENROUTER_MODEL
   if (!value || /^your[-_]/i.test(value)) return null
   return value.trim()
 }
@@ -41,7 +41,7 @@ async function callOpenRouter(model: string, messages: Array<{ role: 'system' | 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST', signal: AbortSignal.timeout(timeout),
       headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, temperature: 0, messages, response_format: { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema } } }),
+      body: JSON.stringify({ model, max_tokens: 1_200, temperature: 0, messages, response_format: { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema } } }),
     })
     return response.ok ? parseResponseBody(await response.json()) : null
   } catch { return null }
@@ -69,7 +69,7 @@ function boundedContext(history: HistoricalRetrieval) {
 }
 
 export async function answerFromPersonalMemory(query: string, history: HistoricalRetrieval, route?: MemoryRoute): Promise<FinalAnswer | null> {
-  if (!isPersonalMemoryRecall(query) || (!history.memoryItems.length && !history.messages.length)) return null
+  if ((!isPersonalMemoryRecall(query) && route !== 'personal') || (!history.memoryItems.length && !history.messages.length)) return null
   if (route && route !== 'personal') return null
   const apiKey = process.env.OPENROUTER_API_KEY
   const model = configuredModel()

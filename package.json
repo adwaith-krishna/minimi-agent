@@ -7,7 +7,8 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:live": "node scripts/run-live-e2e.mjs"
   },
   "dependencies": {
     "@google/genai": "^3.2.0",

@@ -4,7 +4,7 @@ import { historicalClaimSources } from './evidence'
 type HistoricalFact = {
   entityName: string; claimType: ExtractedResearchClaim['claimType']; proposition: string | null; claimText: string; claimValue: string | null
   currency: string | null; billingPeriod: string | null; region: string | null; planOrVersion: string | null
-  priceType: ExtractedResearchClaim['priceType']; discountConditions: string | null; verificationStatus: HistoricalRetrieval['researchSnapshots'][number]['claims'][number]['verificationStatus']; sourceIds: string[]
+  priceType: ExtractedResearchClaim['priceType']; discountConditions: string | null; verificationStatus: HistoricalRetrieval['researchSnapshots'][number]['claims'][number]['verificationStatus']; sourceIds: string[]; shortlistBaseline?: boolean
 }
 
 const normalize = (value: string | null | undefined): string => (value ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
@@ -22,8 +22,11 @@ function historicalFacts(history: HistoricalRetrieval): HistoricalFact[] {
     }
   }))
   const messages = history.messages.filter((message) => message.role !== 'system' && !/\b(?:my name is|i live|i work|i have|i am from|i prefer|personal memory|personal schedule|meeting|exams?|a date)\b/i.test(message.content)).flatMap((message) => {
+    const shortlist = message.content.match(/\bshortlisted\s+(.+?)\s+for\b/i)?.[1]
+      ?.split(/,|\band\b/i).map((value) => value.replace(/^\s*(?:the|a|an)\s+/i, '').trim()).filter((value) => value.length > 1 && value.length < 80) ?? []
+    if (shortlist.length) return shortlist.map((entity) => ({ entityName: entity, claimType: 'general' as const, proposition: null, claimText: `Earlier shortlist: ${entity}.`, claimValue: null, currency: null, billingPeriod: null, region: null, planOrVersion: null, priceType: 'unknown' as const, discountConditions: null, verificationStatus: 'supported' as const, sourceIds: [`history-message:${message.id}`], shortlistBaseline: true }))
     const entities = message.content.match(/\b(?:Postgres(?:ql)?|Salesforce|HubSpot|Pipedrive|SugarCRM|Zoho|CRM|Supabase|AWS|Azure|GCP)\b/gi) ?? ['historical conversation']
-    return [...new Set(entities.map((entity) => entity.toLowerCase()))].map((entity) => ({ entityName: entity, claimType: /pricing|price|cost/i.test(message.content) ? 'pricing' as const : 'general' as const, proposition: null, claimText: message.content, claimValue: null, currency: null, billingPeriod: null, region: null, planOrVersion: null, priceType: 'unknown' as const, discountConditions: null, verificationStatus: 'supported' as const, sourceIds: [`history-message:${message.id}`] }))
+    return [...new Set(entities.map((entity) => entity.toLowerCase()))].map((entity) => ({ entityName: entity, claimType: /pricing|price|cost/i.test(message.content) ? 'pricing' as const : 'general' as const, proposition: null, claimText: message.content, claimValue: null, currency: null, billingPeriod: null, region: null, planOrVersion: null, priceType: 'unknown' as const, discountConditions: null, verificationStatus: 'supported' as const, sourceIds: [`history-message:${message.id}`], shortlistBaseline: false }))
   })
   return [...research, ...messages]
 }
@@ -57,7 +60,7 @@ function oppositeValues(a: string | null, b: string | null): boolean {
 }
 
 function sameBase(oldFact: HistoricalFact, current: ExtractedResearchClaim): boolean {
-  return normalize(oldFact.entityName) === normalize(current.entityName) && oldFact.claimType === current.claimType
+  return normalize(oldFact.entityName) === normalize(current.entityName) && (oldFact.claimType === current.claimType || Boolean(oldFact.shortlistBaseline))
 }
 
 function comparableProposition(oldFact: Pick<HistoricalFact, 'proposition'>, current: Pick<ExtractedResearchClaim, 'proposition'>): boolean {
@@ -136,6 +139,9 @@ export function compareHistoricalAndCurrent(history: HistoricalRetrieval, curren
       results.push(result(baseMatches[0].fact.claimText, current.claimText, 'insufficient_evidence', 'Related historical claims lack supported verification status, so novelty cannot be established safely.', [...baseMatches.flatMap(({ fact }) => fact.sourceIds), ...current.sourceIds]))
     } else if (baseMatches.length && current.proposition && baseMatches.every(({ fact }) => fact.proposition && normalize(fact.proposition) !== normalize(current.proposition))) {
       results.push(result(null, current.claimText, 'new_information', 'This is a distinct proposition from the historical claims retrieved; absence does not prove it is newly introduced.', current.sourceIds))
+    } else if (baseMatches.some(({ fact }) => fact.shortlistBaseline)) {
+      for (const { index } of baseMatches) matchedOld.add(index)
+      results.push(result(baseMatches[0].fact.claimText, current.claimText, 'insufficient_evidence', 'This tool was in the earlier shortlist, but no comparable earlier price or feature claim was stored.', [...baseMatches.flatMap(({ fact }) => fact.sourceIds), ...current.sourceIds]))
     } else if (baseMatches.length) {
       results.push(result(baseMatches[0].fact.claimText, current.claimText, 'insufficient_evidence', 'A related entity and claim type exists, but the proposition cannot be matched safely.', [...baseMatches.flatMap(({ fact }) => fact.sourceIds), ...current.sourceIds]))
     } else {

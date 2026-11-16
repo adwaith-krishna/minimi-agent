@@ -17,6 +17,27 @@ Minimi is designed as a modular monolith built with:
 - **Validation:** Zod v4 and typed domain schemas
 - **Testing:** Vitest automated test suite
 
+The application is split into explicit domain services rather than networked
+microservices. `ConversationLedger` owns authenticated history and turn
+persistence, `PersonalMemoryService` owns capture/retrieval through Supabase
+pgvector, `TavilyResearchService` owns bounded web execution,
+`BaselineComparisonService` compares current verified claims with historical
+user baselines, and `EvidenceResponseComposer` owns user-facing fallback and
+rejection wording. The orchestrator coordinates these ports and contains no
+provider-specific persistence logic.
+
+Every research turn is persisted as a historical episode: the original query,
+bounded search plan, source records, extracted claims, verification status, and
+final comparison. Historical user messages are first-class baselines; prior
+assistant prose is never treated as authoritative evidence.
+
+Personal context uses a hybrid Supabase memory index: original authenticated
+messages are chunked into `personal_context_chunks`, structured facts remain in
+`memory_items`, and both have pgvector indexes with RLS-scoped matching RPCs.
+The model decides whether a message is capture, personal retrieval, web search,
+or rejection; personal answers are generated only from retrieved user-scoped
+memory context.
+
 The design distinguishes:
 - **Recorded time (`created_at`):** When Minimi stored a record.
 - **Event / valid time (`valid_at`, `valid_from`, `valid_to`):** When facts, decisions, or research claims were true.
@@ -99,6 +120,10 @@ Apply migrations in numerical order (00001 to 00011) via the Supabase Dashboard 
 9. `supabase/migrations/00009_atomic_persistence_and_ranked_retrieval.sql` — Atomic research persistence, authenticated grants, and ranked retrieval RPC
 10. `supabase/migrations/00010_harden_trigger_function_search_paths.sql` — Hardened trigger search paths and indexes
 11. `supabase/migrations/00011_persist_conversation_turn.sql` — Atomic conversation-turn and explicit-memory persistence
+12. `supabase/migrations/00012_persist_memory_event_time.sql` — Persist event-time memory fields
+13. `supabase/migrations/00013_create_personal_memory_vectors.sql` — Structured memory pgvector index
+14. `supabase/migrations/00014_scope_personal_memory_vectors_by_model.sql` — Embedding-model scoping
+15. `supabase/migrations/00015_create_personal_context_chunks.sql` — Message-chunk pgvector index and RLS
 
 ### 4. Configure Supabase Auth
 

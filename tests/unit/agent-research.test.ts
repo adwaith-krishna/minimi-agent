@@ -215,6 +215,16 @@ describe('historical and current comparison', () => {
     const comparison = compareHistoricalAndCurrent(history, [current()])
     expect(comparison.every((item) => !item.sourceIds.some((id) => id.startsWith('history-memory:')))).toBe(true)
   })
+
+  it('maps a shortlisted tool to current evidence without claiming an unverified change', () => {
+    const history: HistoricalRetrieval = {
+      messages: [{ id: '00000000-0000-4000-8000-000000000001', conversationId: '00000000-0000-4000-8000-000000000002', role: 'user', content: 'On Monday, I shortlisted Notion, Asana, Linear, Trello, and ClickUp for a design team.', createdAt: '2026-11-10T10:00:00.000Z' }],
+      memoryItems: [], researchSnapshots: [],
+    }
+    const comparison = compareHistoricalAndCurrent(history, [current({ entityName: 'Notion', claimType: 'pricing', claimText: 'Notion Plus is $10 per member/month', proposition: 'Notion Plus plan', claimValue: '10', sourceIds: ['web-1'] })])
+    expect(comparison[0].historicalClaim).toContain('Notion')
+    expect(comparison[0].explanation).toContain('earlier shortlist')
+  })
 })
 
 describe('full research orchestration', () => {
@@ -265,7 +275,7 @@ describe('full research orchestration', () => {
     mock.deps.planSearch = () => ({ ...basePlan, currentQuestions: ['first', 'second'] })
     vi.mocked(mock.tavily.search).mockRejectedValue(new Error('provider secret'))
     const output = await executeAgent({ query: 'latest Acme news' }, context, mock.deps)
-    expect(output).toMatchObject({ status: 'failed', answer: null, searchExecution: { attemptedCalls: 2, outcomes: [{ status: 'failed' }, { status: 'failed' }] }, error: { code: 'PROVIDER_ERROR' } })
+    expect(output).toMatchObject({ status: 'failed', answer: { text: 'I don’t have a reliable source-based answer for that.' }, searchExecution: { attemptedCalls: 2, outcomes: [{ status: 'failed' }, { status: 'failed' }] }, error: { code: 'PROVIDER_ERROR' } })
     expect(mock.reasoner.generateAnswer).not.toHaveBeenCalled()
     expect(mock.persistence.persist).toHaveBeenCalledOnce()
   })
@@ -291,7 +301,7 @@ describe('full research orchestration', () => {
     const mock = dependencies()
     vi.mocked(mock.reasoner.generateAnswer).mockRejectedValue(new Error('Gemini private detail'))
     const output = await executeAgent({ query: 'latest Acme news' }, context, mock.deps)
-    expect(output).toMatchObject({ status: 'partial', answer: { citations: expect.any(Array), text: expect.stringContaining('current evidence') }, error: null })
+    expect(output).toMatchObject({ status: 'partial', answer: { text: 'I don’t have a reliable source-based answer for that.' }, error: { code: 'PROVIDER_ERROR' } })
     expect(JSON.stringify(output)).not.toContain('private detail')
     expect(mock.persistence.persist).toHaveBeenCalledOnce()
   })

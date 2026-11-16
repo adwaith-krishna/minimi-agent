@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 import { HistoricalRetrievalSchema, HttpUrlSchema, PublishedDateSchema, type HistoricalRetrieval, type PublishedDate, type TemporalRetrievalFilter } from './contracts'
 import { createMemoryEmbeddings, indexMemoryRows, indexPersonalMessage } from './memory-embeddings'
+import { isPersonalMemoryRecall } from './memory'
 
 export interface HistoricalRepository {
   retrieve(input: { userId: string; query: string; conversationId?: string; temporalFilter?: TemporalRetrievalFilter; temporalTerms?: string[] }): Promise<HistoricalRetrieval>
@@ -41,15 +42,6 @@ const STOP_WORDS = new Set(['a', 'about', 'an', 'and', 'are', 'as', 'at', 'be', 
 // date in the question is valid/event time, not the timestamp at which that
 // earlier message was recorded. Filtering messages by the requested date
 // would therefore hide the very statement needed to answer the question.
-function isPersonalMemoryRecall(query: string): boolean {
-  const personalCue = /\b(?:my|i|we|our|me|remember|saved|upcoming)\b/i.test(query)
-  const memoryTopic = /\b(?:plan|planned|scheduled|schedule|meetings?|appointments?|calendar|events?)\b/i.test(query)
-  return /\b(?:remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i.test(query)
-    || (personalCue && memoryTopic)
-    || /\bwhat(?:'s| is| are)\s+(?:on|planned|scheduled|my upcoming)\b/i.test(query)
-    || /\bwhen is my\b/i.test(query)
-}
-
 export function buildHistoricalSearchQuery(value: string): string {
   const words = value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
   const meaningful = words.filter((word) => word.length > 1 && !STOP_WORDS.has(word))
@@ -97,6 +89,9 @@ export class SupabaseHistoricalRepository implements HistoricalRepository {
         }
       }
     }
+    // Vectors improve semantic ranking, but the authenticated structured
+    // ledger remains the source of truth. An empty or delayed vector index
+    // must never hide saved facts, dates, or prior user messages.
     type RankedCandidate = { kind: string; id: string; rank: number }
     let rankedCandidates: RankedCandidate[] | null = null
     // The RPC applies RLS as the caller and ranks in PostgreSQL, avoiding the

@@ -1,7 +1,7 @@
 import type { FinalAnswer, HistoricalRetrieval } from './contracts'
 
 export type RememberedMemory = {
-  entityType: 'fact' | 'preference'
+  entityType: 'fact' | 'preference' | 'decision' | 'topic' | 'product' | 'company' | 'other'
   entityName: string
   content: string
   validFrom?: string | null
@@ -21,7 +21,7 @@ const monthAliases: Record<string, string> = {
 const monthPattern = 'january|januvary|february|febuary|march|april|may|june|july|august|september|septemeber|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec'
 
 function clean(value: string): string {
-  return value.replace(/[\s.]+$/, '').trim().slice(0, MAX_MEMORY_VALUE)
+  return value.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').replace(/[\s.]+$/, '').trim().slice(0, MAX_MEMORY_VALUE)
 }
 
 function isQuestion(value: string): boolean {
@@ -62,13 +62,14 @@ function monthKeys(value: string): Set<string> {
   return new Set(matches.map((month) => monthAliases[month.toLowerCase()] ?? month.toLowerCase()))
 }
 
-const memoryRecallPattern = /\b(?:remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information)\b/i
+const memoryRecallPattern = /\b(?:remember|saved information|personal memory|upcoming events?|my schedule|my notes|my information|shortlist|shortlisted)\b/i
 
 export function isPersonalMemoryRecall(query: string): boolean {
   const personalCue = /\b(?:my|i|we|our|me|remember|saved|upcoming)\b/i.test(query)
   const memoryTopic = /\b(?:plan|planned|scheduled|schedule|meeting|appointment|calendar|events?)\b/i.test(query)
-  const personalFactQuestion = /\b(?:what(?:'s| is)|what do I|where do I|who am I|tell me about)\s+(?:my|me|I|name|location|work|job|prefer|preferences?|interests?|favorite|personal information)\b/i.test(query)
+  const personalFactQuestion = /\b(?:what(?:'s| is)|what do I|where do I|who am I|tell me about)\s+(?:my|me|I|name|live|do|location|work|job|prefer|preferences?|interests?|favorite|personal information)\b/i.test(query)
   return memoryRecallPattern.test(query) || (personalCue && memoryTopic) || personalFactQuestion
+    || /\b(?:did I mention|what did I say|what project am I building|what project context)\b/i.test(query)
     || /\bwhat(?:'s| is| are)\s+(?:on|planned|scheduled|my upcoming)\b/i.test(query)
 }
 
@@ -92,6 +93,10 @@ function displayMemoryFact(value: string): string {
     .replace(/^The user is from\s+/i, 'You are from ')
     .replace(/^The user works at\s+/i, 'You work at ')
     .replace(/^The user works on\s+/i, 'You work on ')
+    .replace(/^The user works as\s+/i, 'You work as ')
+    .replace(/^The user is building\s+/i, 'You are building ')
+    .replace(/^The user plans to use\s+/i, 'You plan to use ')
+    .replace(/^The user is comparing\s+/i, 'You are comparing ')
     .replace(/^The user studies at\s+/i, 'You study at ')
     .replace(/^The user prefers\s+/i, 'You prefer ')
     .replace(/^The user likes\s+/i, 'You like ')
@@ -110,7 +115,7 @@ function displayMemoryFact(value: string): string {
 }
 
 function eventEntityName(value: string): string {
-  const match = value.match(/\b(exams?|tests?|meetings?|appointments?|calls?|interviews?|classes|lessons?|deadlines?|birthdays?|dates?|trips?|flights?|presentations?)\b/i)
+  const match = value.match(/\b(exams?|tests?|meetings?|appointments?|calls?|interviews?|classes|lessons?|deadlines?|birthdays?|dates?|trips?|flights?|presentations?|reviews?|assignments?|submissions?|certification)\b/i)
   return match?.[1]?.toLowerCase() ?? 'personal schedule'
 }
 
@@ -119,17 +124,22 @@ function eventEntityName(value: string): string {
  * messages, while these records make common personal-assistant lookups fast.
  */
 function extractSingleExplicitMemories(query: string, options: { referenceYear?: number } = {}): RememberedMemory[] {
-  const value = query.trim()
+  const value = query.trim().replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '')
   if (!value || /(password|passcode|otp|one[- ]time code|api key|secret)/i.test(value)) return []
 
-  const patterns: Array<{ expression: RegExp; entityName: string; prefix: string; entityType?: 'fact' | 'preference' }> = [
+  const patterns: Array<{ expression: RegExp; entityName: string; prefix: string; entityType?: RememberedMemory['entityType'] }> = [
     { expression: /^my name is\s+(.+)$/i, entityName: 'name', prefix: 'The user\'s name is' },
     { expression: /^i live in\s+(.+)$/i, entityName: 'location', prefix: 'The user lives in' },
     { expression: /^i am from\s+(.+)$/i, entityName: 'origin', prefix: 'The user is from' },
     { expression: /^i work (?:at|for)\s+(.+)$/i, entityName: 'work', prefix: 'The user works at' },
     { expression: /^i work on\s+(.+)$/i, entityName: 'work', prefix: 'The user works on' },
+    { expression: /^i work as\s+(.+)$/i, entityName: 'work', prefix: 'The user works as' },
     { expression: /^i study at\s+(.+)$/i, entityName: 'education', prefix: 'The user studies at' },
     { expression: /^i prefer\s+(.+)$/i, entityName: 'preference', prefix: 'The user prefers', entityType: 'preference' },
+    { expression: /^i am building\s+(.+)$/i, entityName: 'project', prefix: 'The user is building', entityType: 'product' },
+    { expression: /^i plan to use\s+(.+)$/i, entityName: 'future technology plan', prefix: 'The user plans to use', entityType: 'decision' },
+    { expression: /^i will use\s+(.+)$/i, entityName: 'future technology plan', prefix: 'The user plans to use', entityType: 'decision' },
+    { expression: /^i am comparing\s+(.+)$/i, entityName: 'research topic', prefix: 'The user is comparing', entityType: 'topic' },
     { expression: /^remember that\s+(.+)$/i, entityName: 'user-provided fact', prefix: 'The user asked Minimi to remember that' },
   ]
 
@@ -138,11 +148,14 @@ function extractSingleExplicitMemories(query: string, options: { referenceYear?:
     { entityType: 'fact', entityName: 'name', content: `The user's name is ${clean(compoundFacts[1])}.` },
     { entityType: 'preference', entityName: 'preference', content: `The user prefers ${clean(compoundFacts[2])}.` },
   ]
-  const compoundWork = value.match(/^i live in\s+(.+?)\s+and\s+i work\s+(at|for|on)\s+(.+)$/i)
+  const compoundWork = value.match(/^i live in\s+(.+?)\s+and\s+i work\s+(at|for|on|as)\s+(.+)$/i)
   if (compoundWork) return [
     { entityType: 'fact', entityName: 'location', content: `The user lives in ${clean(compoundWork[1])}.` },
     { entityType: 'fact', entityName: 'work', content: `The user works ${compoundWork[2].toLowerCase()} ${clean(compoundWork[3])}.` },
   ]
+
+  const shortlist = value.match(/^(?:on\s+[^,]+,?\s+)?(?:i\s+)?shortlisted\s+(.+?)(?:\s+for\s+.+)?$/i)
+  if (shortlist?.[1]) return [{ entityType: 'decision', entityName: 'research shortlist', content: `The user shortlisted ${clean(shortlist[1])}.` }]
 
   for (const pattern of patterns) {
     const match = value.match(pattern.expression)
@@ -166,7 +179,7 @@ function extractSingleExplicitMemories(query: string, options: { referenceYear?:
   // “remember that”. Keep the original wording so a later question can match
   // names, dates, times, and the event relationship without guessing.
   const hasDate = new RegExp(`\\b(?:${monthPattern})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\b\\d{4}-\\d{2}-\\d{2}\\b`, 'i').test(value)
-  const hasEvent = /\b(meetings?|meet|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|dates?|予定|scheduled|schedule|agenda|founder|deadlines?|plans?|planned|birthdays?|trips?|flights?|presentations?)\b/i.test(value)
+  const hasEvent = /\b(meetings?|meet|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|dates?|reviews?|assignments?|submissions?|certification|submit|portfolio|予定|scheduled|schedule|agenda|founder|deadlines?|plans?|planned|birthdays?|trips?|flights?|presentations?)\b/i.test(value)
   if (hasDate && hasEvent && !isQuestion(value)) {
     const dates = eventDateLabels(value)
     if (dates.length <= 1) {
@@ -194,14 +207,24 @@ export function buildDeterministicMemoryAnswer(query: string, history: Historica
   if (!isPersonalMemoryRecall(query)) return null
   const savedUserMessages = history.messages.filter((message) => message.role === 'user'
     && !isQuestion(message.content)
-    && /\b(meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|schedule|scheduled|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?)\b/i.test(message.content))
+    && /\b(meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|reviews?|assignments?|submissions?|certification|schedule|scheduled|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?)\b/i.test(message.content))
   const derivedFactMessages = history.messages.filter((message) => message.role === 'user')
     .flatMap((message) => extractExplicitMemories(message.content).map((memory) => ({ content: memory.content, createdAt: message.createdAt })))
   const scheduleRecall = /\b(?:plan|planned|scheduled|schedule|meeting|appointment|calendar|event|upcoming|exam|test)\b/i.test(query)
-  const personalFactRecall = /\b(?:what(?:'s| is) my|where do I|who am I|what do I|name|live|location|work|job|prefer|preference|interest|favorite|personal information|about me)\b/i.test(query)
+  const personalFactRecall = /\b(?:what(?:'s| is) my|where do I|who am I|what do I|name|live|location|work|job|prefer|preference|interest|favorite|personal information|about me|did I mention|what did I say|project|building|plan to use|technolog)\b/i.test(query)
+  const requestedFactTerms = (() => {
+    const text = query.toLowerCase()
+    if (/\bname\b/.test(text)) return ['name']
+    if (/\b(?:where do i live|location|live)\b/.test(text)) return ['location', 'origin', 'lives in', 'from']
+    if (/\b(?:what do i do|work|job)\b/.test(text)) return ['work', 'works as', 'works at', 'works on']
+    if (/\b(?:project|building)\b/.test(text)) return ['project', 'building', 'taskpilot']
+    if (/\b(?:plan to use|technolog|typescript|postgres)\b/.test(text)) return ['future technology plan', 'plans to use', 'typescript', 'postgres']
+    const meaningful = text.match(/[a-z0-9]{3,}/g)?.filter((word) => !['what', 'did', 'mention', 'anything', 'about', 'that', 'have', 'with', 'from'].includes(word)) ?? []
+    return meaningful.slice(0, 4)
+  })()
   const savedMemories = history.memoryItems.filter((memory) => {
     if (!scheduleRecall && personalFactRecall) return !/schedule|meeting|appointment|exam|event/i.test(`${memory.entityName} ${memory.content}`)
-    return /\b(schedule|scheduled|meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?|name|location|work|education|preference|interest)\b/i.test(`${memory.entityName} ${memory.content}`)
+    return /\b(schedule|scheduled|meetings?|appointments?|calls?|interviews?|exams?|tests?|classes|lessons?|reviews?|assignments?|submissions?|certification|founder|deadlines?|plans?|planned|date|birthdays?|trips?|flights?|presentations?|name|location|work|education|preference|interest)\b/i.test(`${memory.entityName} ${memory.content}`)
   })
   const requestedDates = dateKeys(query)
   const requestedMonths = monthKeys(query)
@@ -217,6 +240,7 @@ export function buildDeterministicMemoryAnswer(query: string, history: Historica
     const canonical = displayMemoryFact(candidate.content).toLowerCase().replace(/(\d)(?:st|nd|rd|th)\b/g, '$1')
     return all.findIndex((item) => displayMemoryFact(item.content).toLowerCase().replace(/(\d)(?:st|nd|rd|th)\b/g, '$1') === canonical) === index
   })
+    .filter((candidate) => !personalFactRecall || !requestedFactTerms.length || requestedFactTerms.some((term) => normalizeMemoryText(candidate.content).includes(term)))
     .filter((candidate) => (!requestedDates.size || [...requestedDates].some((date) => dateKeys(candidate.content).has(date)))
       && (!requestedMonths.size || [...requestedMonths].some((month) => monthKeys(candidate.content).has(month))))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -235,9 +259,25 @@ export function buildDeterministicMemoryAnswer(query: string, history: Historica
   }
 }
 
+function normalizeMemoryText(value: string): string {
+  return value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+}
+
 export function buildDeterministicMemoryAcknowledgement(query: string): FinalAnswer | null {
   const memories = extractExplicitMemories(query)
   if (!memories.length) return null
   if (memories.length === 1) return { text: `I’ve noted this in your personal memory: ${displayMemoryFact(memories[0].content)}`, citations: [], claims: [] }
   return { text: `I’ve saved these details in your personal memory:\n\n${memories.map((memory) => `• ${displayMemoryFact(memory.content)}`).join('\n\n')}`, citations: [], claims: [] }
+}
+
+export function buildMemoryAcknowledgement(memories: RememberedMemory[]): FinalAnswer | null {
+  if (!memories.length) return null
+  const lines = memories.map((memory) => `• ${displayMemoryFact(memory.content)}`)
+  return {
+    text: lines.length === 1
+      ? `I’ve saved this in your personal memory: ${displayMemoryFact(memories[0].content)}`
+      : `I’ve saved these details in your personal memory:\n\n${lines.join('\n\n')}`,
+    citations: [],
+    claims: [],
+  }
 }
